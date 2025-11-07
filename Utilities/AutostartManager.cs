@@ -1,6 +1,7 @@
 ﻿using Microsoft.Win32;
 using System.IO;
 using System.Reflection;
+using System;
 
 namespace GreenLuma_Manager.Utilities
 {
@@ -112,7 +113,9 @@ namespace GreenLuma_Manager.Utilities
 
                 if (enable)
                 {
-                    string? appPath = Assembly.GetEntryAssembly()?.Location;
+                    string? appPath = Environment.ProcessPath ??
+                                      Path.Combine(AppContext.BaseDirectory, AppDomain.CurrentDomain.FriendlyName);
+
                     if (!string.IsNullOrWhiteSpace(appPath))
                     {
                         runKey.SetValue(GreenLumaValueName, $"\"{appPath}\"");
