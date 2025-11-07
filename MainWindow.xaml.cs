@@ -408,7 +408,7 @@ namespace GreenLuma_Manager
             _loadingDotsTimer?.Start();
         }
 
-        private async void DisplaySearchResults(List<Game> results)
+        private void DisplaySearchResults(List<Game> results)
         {
             _searchResults.Clear();
 
@@ -488,7 +488,7 @@ namespace GreenLuma_Manager
             }
         }
 
-        private async void AddGameButton_Click(object sender, RoutedEventArgs e)
+        private void AddGameButton_Click(object sender, RoutedEventArgs e)
         {
             if (sender is not Button button || button.Tag is not Game result)
                 return;
