@@ -90,6 +90,8 @@ namespace GreenLuma_Manager.Services
                     })
                     .ToList();
 
+                await FetchTypesForGamesAsync(matches);
+
                 return matches;
             }
             catch (Exception ex)
@@ -266,6 +268,93 @@ namespace GreenLuma_Manager.Services
                         game.IconUrl = details.IconUrl;
                     }
                 }
+            }
+        }
+
+        private static async Task FetchTypesForGamesAsync(List<Game> games)
+        {
+            var semaphore = new SemaphoreSlim(MaxConcurrentRequests);
+            var syncContext = System.Threading.SynchronizationContext.Current;
+            try
+            {
+                await Task.WhenAll(games.Select(async game =>
+                {
+                    await semaphore.WaitAsync();
+                    try
+                    {
+                        try
+                        {
+                            string url = string.Format(SteamAppDetailsUrl, game.AppId);
+                            string response = await _client.GetStringAsync(url);
+                            var json = JObject.Parse(response)[game.AppId];
+                            if (json?["success"]?.Value<bool>() == true)
+                            {
+                                var data = json["data"];
+                                if (data != null)
+                                {
+                                    string rawType = data["type"]?.ToString().ToLower() ?? "game";
+                                    string type = MapSteamTypeToDisplayType(rawType);
+                                    if (syncContext != null)
+                                    {
+                                        var tcs = new TaskCompletionSource<bool>();
+                                        syncContext.Post(_ =>
+                                        {
+                                            try
+                                            {
+                                                game.Type = type;
+                                                tcs.SetResult(true);
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                tcs.SetException(ex);
+                                            }
+                                        }, null);
+                                        await tcs.Task;
+                                    }
+                                    else
+                                    {
+                                        game.Type = type;
+                                    }
+
+                                    return;
+                                }
+                            }
+                        }
+                        catch
+                        {
+                        }
+
+                        if (syncContext != null)
+                        {
+                            var tcs = new TaskCompletionSource<bool>();
+                            syncContext.Post(_ =>
+                            {
+                                try
+                                {
+                                    game.Type = "Game";
+                                    tcs.SetResult(true);
+                                }
+                                catch (Exception ex)
+                                {
+                                    tcs.SetException(ex);
+                                }
+                            }, null);
+                            await tcs.Task;
+                        }
+                        else
+                        {
+                            game.Type = "Game";
+                        }
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                }));
+            }
+            finally
+            {
+                semaphore.Dispose();
             }
         }
 
