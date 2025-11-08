@@ -168,7 +168,7 @@ namespace GreenLuma_Manager.Dialogs
             _config.AutoUpdate = chkAutoUpdate.IsChecked.GetValueOrDefault();
 
             ConfigService.Save(_config);
-            AutostartManager.ManageAutostart(_config.ReplaceSteamAutostart, steamPath);
+            AutostartManager.ManageAutostart(_config.ReplaceSteamAutostart, _config);
 
             DialogResult = true;
             Close();

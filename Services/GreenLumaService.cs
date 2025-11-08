@@ -4,17 +4,21 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace GreenLuma_Manager.Services
 {
-    public class GreenLumaService
+    public partial class GreenLumaService
     {
         private static readonly string[] SteamProcessNames = ["steam", "steamwebhelper", "steamerrorfilereporter"];
 
         private const int SteamKillDelayMs = 2000;
         private const int ProcessKillTimeoutMs = 5000;
+
+        [GeneratedRegex(@"[A-Za-z]:\\[^""\r\n]+?\.dll", RegexOptions.IgnoreCase)]
+        private static partial Regex DllPathRegex();
 
         public static bool IsAppListGenerated(Config config)
         {
@@ -226,24 +230,55 @@ namespace GreenLuma_Manager.Services
 
         private static string? ExtractDllValue(List<string> lines)
         {
-            foreach (string line in lines)
+            try
             {
-                string trimmed = line.Trim();
-
-                if (trimmed.StartsWith("Dll", StringComparison.OrdinalIgnoreCase))
+                foreach (string line in lines)
                 {
-                    int equalsIndex = line.IndexOf('=');
-                    if (equalsIndex >= 0 && equalsIndex < line.Length - 1)
-                    {
-                        string value = line[(equalsIndex + 1)..].TrimStart();
-                        return value;
-                    }
+                    string trimmed = line.Trim();
 
-                    break;
+                    if (trimmed.StartsWith("Dll", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int equalsIndex = line.IndexOf('=');
+                        if (equalsIndex >= 0 && equalsIndex < line.Length - 1)
+                        {
+                            string raw = line[(equalsIndex + 1)..].Trim();
+                            string cleaned = CleanDllValue(raw);
+                            return cleaned;
+                        }
+
+                        break;
+                    }
                 }
+            }
+            catch
+            {
             }
 
             return null;
+        }
+
+        private static string CleanDllValue(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return string.Empty;
+
+            string s = raw.Trim();
+            s = s.Trim('"', '\'', ' ');
+
+            try
+            {
+                var m = DllPathRegex().Match(s);
+
+                if (m.Success)
+                {
+                    return m.Value;
+                }
+            }
+            catch
+            {
+            }
+
+            return s;
         }
 
         private static Dictionary<string, string> BuildInjectorSettings(Config config, string? dllValue)
@@ -265,13 +300,42 @@ namespace GreenLuma_Manager.Services
 
                 if (!string.IsNullOrWhiteSpace(dllValue))
                 {
-                    if (Path.IsPathRooted(dllValue))
+                    string candidate = dllValue.Trim();
+
+                    bool rooted;
+                    try
                     {
-                        settings["Dll"] = $" \"{dllValue}\"";
+                        rooted = Path.IsPathRooted(candidate);
+                    }
+                    catch
+                    {
+                        rooted = false;
+                    }
+
+                    if (rooted)
+                    {
+                        string full = candidate;
+                        try
+                        {
+                            full = Path.GetFullPath(candidate);
+                        }
+                        catch
+                        {
+                        }
+
+                        settings["Dll"] = $" \"{full}\"";
                     }
                     else
                     {
-                        string fullDllPath = Path.Combine(config.GreenLumaPath, dllValue);
+                        string fullDllPath = Path.Combine(config.GreenLumaPath, candidate);
+                        try
+                        {
+                            fullDllPath = Path.GetFullPath(fullDllPath);
+                        }
+                        catch
+                        {
+                        }
+
                         settings["Dll"] = $" \"{fullDllPath}\"";
                     }
                 }

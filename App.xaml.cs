@@ -19,6 +19,27 @@ namespace GreenLuma_Manager
             base.OnStartup(e);
             try
             {
+                if (e.Args != null && e.Args.Length > 0)
+                {
+                    foreach (var arg in e.Args)
+                    {
+                        if (string.Equals(arg, "--launch-greenluma", StringComparison.OrdinalIgnoreCase))
+                        {
+                            try
+                            {
+                                var config = ConfigService.Load();
+                                GreenLumaService.LaunchGreenLumaAsync(config).GetAwaiter().GetResult();
+                            }
+                            catch
+                            {
+                            }
+
+                            Shutdown();
+                            return;
+                        }
+                    }
+                }
+
                 var profiles = ProfileService.LoadAll();
                 var valid = new HashSet<string>(profiles
                     .SelectMany(p => p.Games)

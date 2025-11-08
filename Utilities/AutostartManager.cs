@@ -2,6 +2,7 @@
 using System.IO;
 using System.Reflection;
 using System;
+using GreenLuma_Manager.Models;
 
 namespace GreenLuma_Manager.Utilities
 {
@@ -13,7 +14,7 @@ namespace GreenLuma_Manager.Utilities
         private const string GreenLumaValueName = "GreenLumaManager";
         private const string GreenLumaMonitorValueName = "GreenLumaMonitor";
 
-        public static void ManageAutostart(bool replaceSteam, string greenlumaPath)
+        public static void ManageAutostart(bool replaceSteam, Config config)
         {
             try
             {
@@ -22,13 +23,13 @@ namespace GreenLuma_Manager.Utilities
                 if (runKey == null)
                     return;
 
-                if (replaceSteam && !string.IsNullOrWhiteSpace(greenlumaPath))
+                if (replaceSteam && !string.IsNullOrWhiteSpace(config?.GreenLumaPath))
                 {
-                    ReplaceWithGreenLuma(runKey, greenlumaPath);
+                    ReplaceWithGreenLuma(runKey, config);
                 }
                 else
                 {
-                    RestoreOriginalSteam(runKey, greenlumaPath);
+                    RestoreOriginalSteam(runKey, config?.GreenLumaPath);
                 }
             }
             catch
@@ -36,15 +37,18 @@ namespace GreenLuma_Manager.Utilities
             }
         }
 
-        private static void ReplaceWithGreenLuma(RegistryKey runKey, string greenlumaPath)
+        private static void ReplaceWithGreenLuma(RegistryKey runKey, Config config)
         {
-            string injectorPath = Path.Combine(greenlumaPath, "DLLInjector.exe");
-
-            if (!File.Exists(injectorPath))
+            if (config == null)
                 return;
 
-            string vbsPath = CreateAutostartScript(greenlumaPath, injectorPath);
-            runKey.SetValue(GreenLumaMonitorValueName, $"wscript.exe \"{vbsPath}\"");
+            string? appPath = Environment.ProcessPath ??
+                              Path.Combine(AppContext.BaseDirectory, AppDomain.CurrentDomain.FriendlyName);
+
+            if (string.IsNullOrWhiteSpace(appPath))
+                return;
+
+            runKey.SetValue(GreenLumaMonitorValueName, $"\"{appPath}\" --launch-greenluma");
         }
 
         private static string CreateAutostartScript(string greenlumaPath, string injectorPath)
@@ -78,13 +82,13 @@ namespace GreenLuma_Manager.Utilities
             return vbsPath;
         }
 
-        private static void RestoreOriginalSteam(RegistryKey runKey, string greenlumaPath)
+        private static void RestoreOriginalSteam(RegistryKey runKey, string? greenlumaPath)
         {
             runKey.DeleteValue(GreenLumaMonitorValueName, throwOnMissingValue: false);
             CleanupVbsScript(greenlumaPath);
         }
 
-        private static void CleanupVbsScript(string greenlumaPath)
+        private static void CleanupVbsScript(string? greenlumaPath)
         {
             try
             {
