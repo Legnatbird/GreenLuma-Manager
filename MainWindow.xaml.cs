@@ -18,7 +18,7 @@ namespace GreenLuma_Manager;
 
 public partial class MainWindow : INotifyPropertyChanged
 {
-    public const string Version = "RC1.2";
+    public const string Version = "RC2";
 
     private readonly ObservableCollection<Game> _games;
     private readonly ObservableCollection<string> _profiles;

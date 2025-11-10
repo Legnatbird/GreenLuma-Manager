@@ -9,9 +9,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <ApplicationIcon>icon.ico</ApplicationIcon>
-    <Version>1.0.0-rc1.2</Version>
-    <FileVersion>0.0.0.1</FileVersion>
-    <AssemblyVersion>0.0.0.1</AssemblyVersion>
+    <Version>1.0.0-rc2</Version>
+    <FileVersion>0.0.0.2</FileVersion>
+    <AssemblyVersion>0.0.0.2</AssemblyVersion>
     <Copyright>Copyright © 3vil3vo 2025</Copyright>
     <PackageIcon>icon.ico</PackageIcon>
     <PackageReadmeFile>README.md</PackageReadmeFile>
