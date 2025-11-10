@@ -57,6 +57,7 @@ public partial class MainWindow
         CheckForUpdates();
         CheckPathsOnStartup();
         UpdateGameListState();
+        UpdateStatusIndicator();
     }
 
     public ICommand FocusSearchCommand { get; }
@@ -83,6 +84,7 @@ public partial class MainWindow
     {
         _config = ConfigService.Load();
         if (_config != null) TglStealthMode.IsChecked = _config.NoHook;
+        UpdateStatusIndicator();
     }
 
     private void LoadProfiles()
@@ -212,6 +214,7 @@ public partial class MainWindow
             if (dialog.ShowDialog() == true)
             {
                 LoadConfig();
+                UpdateStatusIndicator();
 
                 var nowHasGreenLumaPath = !string.IsNullOrWhiteSpace(_config.GreenLumaPath);
 
@@ -868,6 +871,7 @@ public partial class MainWindow
 
         var status = toggleButton.IsChecked.GetValueOrDefault() ? "enabled" : "disabled";
         ShowToast($"Stealth mode {status}");
+        UpdateStatusIndicator();
     }
 
     private async void GenerateApplistButton_Click(object sender, RoutedEventArgs e)
@@ -1297,6 +1301,46 @@ public partial class MainWindow
         {
             add => CommandManager.RequerySuggested += value;
             remove => CommandManager.RequerySuggested -= value;
+        }
+    }
+
+    private void UpdateStatusIndicator()
+    {
+        if (_config == null)
+        {
+            StatusIndicator.Fill = Resources["Danger"] as Brush ?? Brushes.Red;
+            TxtStatus.Text = "Not Configured";
+            return;
+        }
+
+        var steamPath = _config.SteamPath.Trim();
+        var greenLumaPath = _config.GreenLumaPath.Trim();
+
+        if (string.IsNullOrWhiteSpace(steamPath) || string.IsNullOrWhiteSpace(greenLumaPath))
+        {
+            StatusIndicator.Fill = Resources["Danger"] as Brush ?? Brushes.Red;
+            TxtStatus.Text = "Not Configured";
+            return;
+        }
+
+        var isSamePath = string.Equals(
+            Path.GetFullPath(steamPath),
+            Path.GetFullPath(greenLumaPath),
+            StringComparison.OrdinalIgnoreCase);
+
+        StatusIndicator.Fill = Resources["Success"] as Brush ?? Brushes.Green;
+
+        if (isSamePath)
+        {
+            TxtStatus.Text = "Ready  •  Normal Mode";
+        }
+        else if (_config.NoHook)
+        {
+            TxtStatus.Text = "Ready  •  Enhanced Stealth Mode";
+        }
+        else
+        {
+            TxtStatus.Text = "Ready  •  Stealth Mode";
         }
     }
 }
