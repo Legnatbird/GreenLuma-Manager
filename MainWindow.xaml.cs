@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -238,16 +239,25 @@ namespace GreenLuma_Manager
             LaunchBrowser("https://github.com/3vil3vo/GreenLuma-Manager");
         }
 
-        private void SettingsButton_Click(object? sender, RoutedEventArgs? e)
+        private async void SettingsButton_Click(object? sender, RoutedEventArgs? e)
         {
             if (_config == null)
                 return;
+
+            bool hadGreenLumaPath = !string.IsNullOrWhiteSpace(_config.GreenLumaPath);
 
             var dialog = new SettingsDialog(_config);
 
             if (dialog.ShowDialog() == true)
             {
                 LoadConfig();
+
+                bool nowHasGreenLumaPath = !string.IsNullOrWhiteSpace(_config.GreenLumaPath);
+
+                if (!hadGreenLumaPath && nowHasGreenLumaPath)
+                {
+                    await ImportExistingAppListAsync();
+                }
             }
         }
 
@@ -1138,6 +1148,130 @@ namespace GreenLuma_Manager
             {
                 add => CommandManager.RequerySuggested += value;
                 remove => CommandManager.RequerySuggested -= value;
+            }
+        }
+
+        private async Task ImportExistingAppListAsync()
+        {
+            if (_config == null) return;
+
+            string? steamAppListPath = !string.IsNullOrWhiteSpace(_config.SteamPath)
+                ? Path.Combine(_config.SteamPath, "AppList")
+                : null;
+            string? greenLumaAppListPath = !string.IsNullOrWhiteSpace(_config.GreenLumaPath)
+                ? Path.Combine(_config.GreenLumaPath, "AppList")
+                : null;
+
+            bool steamHasAppList = steamAppListPath != null && Directory.Exists(steamAppListPath) &&
+                                   Directory.GetFiles(steamAppListPath, "*.txt").Length > 0;
+            bool greenLumaHasAppList = greenLumaAppListPath != null && Directory.Exists(greenLumaAppListPath) &&
+                                       Directory.GetFiles(greenLumaAppListPath, "*.txt").Length > 0;
+
+            if (!steamHasAppList && !greenLumaHasAppList)
+                return;
+
+            string appListToImport = steamHasAppList ? steamAppListPath! : greenLumaAppListPath!;
+            bool showSteamWarning = steamHasAppList;
+
+            var appIds = new HashSet<string>();
+            try
+            {
+                foreach (var file in Directory.GetFiles(appListToImport, "*.txt"))
+                {
+                    string appId = File.ReadAllText(file).Trim();
+                    if (!string.IsNullOrWhiteSpace(appId))
+                    {
+                        appIds.Add(appId);
+                    }
+                }
+            }
+            catch
+            {
+                return;
+            }
+
+            if (appIds.Count == 0)
+                return;
+
+            var result = CustomMessageBox.Show(
+                $"Found {appIds.Count} games in existing AppList.\n\n" +
+                "Would you like to import them into your default profile?",
+                "Import Existing AppList",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result != MessageBoxResult.Yes)
+                return;
+
+            var defaultProfile = ProfileService.Load("default") ?? new Profile { Name = "default" };
+            var existingAppIds = new HashSet<string>(defaultProfile.Games.Select(g => g.AppId));
+
+            var newGames = new List<Game>();
+            foreach (var appId in appIds)
+            {
+                if (!existingAppIds.Contains(appId))
+                {
+                    newGames.Add(new Game { AppId = appId, Name = $"App {appId}", Type = "Game" });
+                }
+            }
+
+            if (newGames.Count == 0)
+            {
+                ShowToast("All games already in profile");
+                return;
+            }
+
+            defaultProfile.Games.AddRange(newGames);
+            ProfileService.Save(defaultProfile);
+
+            if (cmbProfile.SelectedItem?.ToString() == "default")
+            {
+                LoadProfile("default");
+            }
+
+            ShowToast($"Imported {newGames.Count} games into default profile");
+
+            var semaphore = new SemaphoreSlim(6);
+            var tasks = new List<Task>();
+            foreach (var game in newGames)
+            {
+                await semaphore.WaitAsync();
+                tasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        await SearchService.FetchIconUrlAsync(game);
+                        if (!string.IsNullOrWhiteSpace(game.IconUrl))
+                        {
+                            var path = await IconCacheService.DownloadAndCacheIconAsync(game.AppId, game.IconUrl);
+                            if (!string.IsNullOrEmpty(path))
+                            {
+                                game.IconUrl = path;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                }));
+            }
+
+            await Task.WhenAll(tasks);
+            ProfileService.Save(defaultProfile);
+
+            if (showSteamWarning)
+            {
+                CustomMessageBox.Show(
+                    "WARNING: AppList was found in your Steam folder.\n\n" +
+                    "For better stealth, you should uninstall GreenLuma from the Steam folder " +
+                    "and use it from a separate location instead.",
+                    "Stealth Warning",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
             }
         }
     }
