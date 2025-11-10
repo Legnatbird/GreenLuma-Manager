@@ -1,233 +1,203 @@
-﻿using GreenLuma_Manager.Models;
-using Newtonsoft.Json.Linq;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
+﻿using System.IO;
 using System.Runtime.Serialization.Json;
 using System.Text;
+using GreenLuma_Manager.Models;
+using Newtonsoft.Json.Linq;
 
-namespace GreenLuma_Manager.Services
+namespace GreenLuma_Manager.Services;
+
+public class ProfileService
 {
-    public class ProfileService
-    {
-        private static readonly string ProfilesDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "GLM_Manager",
-            "profiles");
+    private static readonly string ProfilesDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "GLM_Manager",
+        "profiles");
 
-        public static List<Profile> LoadAll()
+    public static List<Profile> LoadAll()
+    {
+        var profiles = new List<Profile>();
+        try
         {
-            var profiles = new List<Profile>();
+            EnsureProfilesDirectoryExists();
+            TryMigrateProfilesFromRC3();
+            LoadProfilesFromDirectory(profiles);
+            if (profiles.Count == 0) return CreateDefaultProfile(profiles);
+        }
+        catch
+        {
+        }
+
+        return profiles;
+    }
+
+    private static void EnsureProfilesDirectoryExists()
+    {
+        if (!Directory.Exists(ProfilesDir)) Directory.CreateDirectory(ProfilesDir);
+    }
+
+    private static List<Profile> CreateDefaultProfile(List<Profile> profiles)
+    {
+        var defaultProfile = new Profile { Name = "default" };
+        Save(defaultProfile);
+        profiles.Add(defaultProfile);
+        return profiles;
+    }
+
+    private static void LoadProfilesFromDirectory(List<Profile> profiles)
+    {
+        foreach (var file in Directory.GetFiles(ProfilesDir, "*.json"))
             try
             {
-                EnsureProfilesDirectoryExists();
-                TryMigrateProfilesFromRC3();
-                LoadProfilesFromDirectory(profiles);
-                if (profiles.Count == 0)
-                {
-                    return CreateDefaultProfile(profiles);
-                }
+                var profile = DeserializeProfile(File.ReadAllText(file, Encoding.UTF8));
+                if (profile != null) profiles.Add(profile);
             }
             catch
             {
             }
+    }
 
-            return profiles;
-        }
-
-        private static void EnsureProfilesDirectoryExists()
+    public static Profile? Load(string profileName)
+    {
+        try
         {
-            if (!Directory.Exists(ProfilesDir))
-            {
-                Directory.CreateDirectory(ProfilesDir);
-            }
-        }
+            var filePath = GetProfileFilePath(profileName);
+            if (!File.Exists(filePath))
+                return null;
 
-        private static List<Profile> CreateDefaultProfile(List<Profile> profiles)
-        {
-            var defaultProfile = new Profile { Name = "default" };
-            Save(defaultProfile);
-            profiles.Add(defaultProfile);
-            return profiles;
+            var json = File.ReadAllText(filePath, Encoding.UTF8);
+            return DeserializeProfile(json);
         }
-
-        private static void LoadProfilesFromDirectory(List<Profile> profiles)
+        catch
         {
-            foreach (string file in Directory.GetFiles(ProfilesDir, "*.json"))
-            {
+            return null;
+        }
+    }
+
+    public static void Save(Profile profile)
+    {
+        try
+        {
+            EnsureProfilesDirectoryExists();
+            var filePath = GetProfileFilePath(profile.Name);
+            var json = SerializeProfile(profile);
+            File.WriteAllText(filePath, json, Encoding.UTF8);
+        }
+        catch
+        {
+        }
+    }
+
+    public static void Delete(string profileName)
+    {
+        try
+        {
+            if (string.Equals(profileName, "default", StringComparison.OrdinalIgnoreCase))
+                return;
+
+            var filePath = GetProfileFilePath(profileName);
+            if (File.Exists(filePath)) File.Delete(filePath);
+        }
+        catch
+        {
+        }
+    }
+
+    public static void Export(Profile profile, string destinationPath)
+    {
+        try
+        {
+            var json = SerializeProfile(profile);
+            File.WriteAllText(destinationPath, json, Encoding.UTF8);
+        }
+        catch
+        {
+        }
+    }
+
+    public static Profile? Import(string sourcePath)
+    {
+        try
+        {
+            var json = File.ReadAllText(sourcePath, Encoding.UTF8);
+            return DeserializeProfile(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string GetProfileFilePath(string profileName)
+    {
+        var sanitizedName = SanitizeFileName(profileName);
+        return Path.Combine(ProfilesDir, $"{sanitizedName}.json");
+    }
+
+    private static Profile? DeserializeProfile(string json)
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        var serializer = new DataContractJsonSerializer(typeof(Profile));
+        var obj = serializer.ReadObject(stream);
+        return obj as Profile;
+    }
+
+    private static string SerializeProfile(Profile profile)
+    {
+        using var stream = new MemoryStream();
+        var serializer = new DataContractJsonSerializer(typeof(Profile));
+        serializer.WriteObject(stream, profile);
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static string SanitizeFileName(string name)
+    {
+        var invalidChars = Path.GetInvalidFileNameChars();
+        return new string([.. name.Select(c => invalidChars.Contains(c) ? '_' : c)]);
+        ;
+    }
+
+    private static void TryMigrateProfilesFromRC3()
+    {
+        try
+        {
+            if (!Directory.Exists(ProfilesDir)) return;
+
+            var filesToMigrate = Directory.GetFiles(ProfilesDir, "*.json");
+
+            foreach (var file in filesToMigrate)
                 try
                 {
-                    var profile = DeserializeProfile(File.ReadAllText(file, Encoding.UTF8));
-                    if (profile != null)
+                    var rc3Json = File.ReadAllText(file, Encoding.UTF8);
+                    var rc3Data = JObject.Parse(rc3Json);
+
+                    if (rc3Data["games"] is not JArray gamesArray || gamesArray.Count == 0) continue;
+
+                    if (gamesArray[0] is not JObject firstGame || firstGame["id"] == null) continue;
+
+                    var profile = new Profile
                     {
-                        profiles.Add(profile);
-                    }
+                        Name = rc3Data["name"]?.ToString() ?? "default",
+                        Games =
+                        [
+                            .. gamesArray
+                                .Select(gameToken => new Game
+                                {
+                                    AppId = gameToken["id"]?.ToString() ?? string.Empty,
+                                    Name = gameToken["name"]?.ToString() ?? string.Empty,
+                                    Type = gameToken["type"]?.ToString() ?? "Game"
+                                })
+                                .Where(g => !string.IsNullOrEmpty(g.AppId))
+                        ]
+                    };
+
+                    Save(profile);
                 }
                 catch
                 {
                 }
-            }
         }
-
-        public static Profile? Load(string profileName)
+        catch
         {
-            try
-            {
-                string filePath = GetProfileFilePath(profileName);
-                if (!File.Exists(filePath))
-                    return null;
-
-                string json = File.ReadAllText(filePath, Encoding.UTF8);
-                return DeserializeProfile(json);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        public static void Save(Profile profile)
-        {
-            try
-            {
-                EnsureProfilesDirectoryExists();
-                string filePath = GetProfileFilePath(profile.Name);
-                string json = SerializeProfile(profile);
-                File.WriteAllText(filePath, json, Encoding.UTF8);
-            }
-            catch
-            {
-            }
-        }
-
-        public static void Delete(string profileName)
-        {
-            try
-            {
-                if (string.Equals(profileName, "default", StringComparison.OrdinalIgnoreCase))
-                    return;
-
-                string filePath = GetProfileFilePath(profileName);
-                if (File.Exists(filePath))
-                {
-                    File.Delete(filePath);
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        public static void Export(Profile profile, string destinationPath)
-        {
-            try
-            {
-                string json = SerializeProfile(profile);
-                File.WriteAllText(destinationPath, json, Encoding.UTF8);
-            }
-            catch
-            {
-            }
-        }
-
-        public static Profile? Import(string sourcePath)
-        {
-            try
-            {
-                string json = File.ReadAllText(sourcePath, Encoding.UTF8);
-                return DeserializeProfile(json);
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private static string GetProfileFilePath(string profileName)
-        {
-            string sanitizedName = SanitizeFileName(profileName);
-            return Path.Combine(ProfilesDir, $"{sanitizedName}.json");
-        }
-
-        private static Profile? DeserializeProfile(string json)
-        {
-            using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
-            var serializer = new DataContractJsonSerializer(typeof(Profile));
-            var obj = serializer.ReadObject(stream);
-            return obj as Profile;
-        }
-
-        private static string SerializeProfile(Profile profile)
-        {
-            using var stream = new MemoryStream();
-            var serializer = new DataContractJsonSerializer(typeof(Profile));
-            serializer.WriteObject(stream, profile);
-            return Encoding.UTF8.GetString(stream.ToArray());
-        }
-
-        private static string SanitizeFileName(string name)
-        {
-            var invalidChars = Path.GetInvalidFileNameChars();
-            return new string([.. name.Select(c => invalidChars.Contains(c) ? '_' : c)]);
-            ;
-        }
-
-        private static void TryMigrateProfilesFromRC3()
-        {
-            try
-            {
-                if (!Directory.Exists(ProfilesDir))
-                {
-                    return;
-                }
-
-                var filesToMigrate = Directory.GetFiles(ProfilesDir, "*.json");
-
-                foreach (string file in filesToMigrate)
-                {
-                    try
-                    {
-                        string rc3Json = File.ReadAllText(file, Encoding.UTF8);
-                        var rc3Data = JObject.Parse(rc3Json);
-
-                        if (rc3Data["games"] is not JArray gamesArray || gamesArray.Count == 0)
-                        {
-                            continue;
-                        }
-
-                        if (gamesArray[0] is not JObject firstGame || firstGame["id"] == null)
-                        {
-                            continue;
-                        }
-
-                        var profile = new Profile
-                        {
-                            Name = rc3Data["name"]?.ToString() ?? "default",
-                            Games =
-                            [
-                                .. gamesArray
-                                    .Select(gameToken => new Game
-                                    {
-                                        AppId = gameToken["id"]?.ToString() ?? string.Empty,
-                                        Name = gameToken["name"]?.ToString() ?? string.Empty,
-                                        Type = gameToken["type"]?.ToString() ?? "Game"
-                                    })
-                                    .Where(g => !string.IsNullOrEmpty(g.AppId))
-                            ]
-                        };
-
-                        Save(profile);
-                    }
-                    catch
-                    {
-                        continue;
-                    }
-                }
-            }
-            catch
-            {
-            }
         }
     }
 }
