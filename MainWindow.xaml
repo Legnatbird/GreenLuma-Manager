@@ -1571,10 +1571,25 @@
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
                                                 <Border
+                                                    x:Name="GameItemBorder"
                                                     Margin="0,0,0,8"
                                                     Padding="16,12"
                                                     Background="{StaticResource SurfaceBg}"
                                                     CornerRadius="8">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsEditing}" Value="False" />
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding IsEditing}" Value="False" />
+                                                                        <Condition Binding="{Binding IsMouseOver, RelativeSource={RelativeSource Self}}" Value="True" />
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Background" Value="#FF1E1E1E" />
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Border.Style>
                                                     <Grid>
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="Auto" />
@@ -1587,7 +1602,7 @@
                                                             Width="48"
                                                             Height="48"
                                                             Margin="0,0,12,0"
-                                                            Background="{StaticResource SurfaceBg}"
+                                                            Background="{StaticResource DarkBg}"
                                                             ClipToBounds="True"
                                                             CornerRadius="6">
                                                             <Grid>
@@ -1625,14 +1640,114 @@
                                                         </Border>
 
                                                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                            <Grid>
+                                                                <TextBlock
+                                                                    x:Name="ViewModeText"
+                                                                    Cursor="IBeam"
+                                                                    FontSize="14"
+                                                                    FontWeight="Medium"
+                                                                    Foreground="{StaticResource Text}"
+                                                                    MouseLeftButtonDown="GameName_MouseLeftButtonDown"
+                                                                    Text="{Binding Name}"
+                                                                    TextTrimming="CharacterEllipsis">
+                                                                    <TextBlock.Style>
+                                                                        <Style TargetType="TextBlock">
+                                                                            <Setter Property="Opacity" Value="1" />
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                                </DataTrigger>
+                                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                                    <Trigger.EnterActions>
+                                                                                        <BeginStoryboard>
+                                                                                            <Storyboard>
+                                                                                                <ColorAnimation
+                                                                                                    Storyboard.TargetProperty="Foreground.Color"
+                                                                                                    To="#FFFFFFFF"
+                                                                                                    Duration="0:0:0.15" />
+                                                                                            </Storyboard>
+                                                                                        </BeginStoryboard>
+                                                                                    </Trigger.EnterActions>
+                                                                                    <Trigger.ExitActions>
+                                                                                        <BeginStoryboard>
+                                                                                            <Storyboard>
+                                                                                                <ColorAnimation
+                                                                                                    Storyboard.TargetProperty="Foreground.Color"
+                                                                                                    To="#FFFFFFFF"
+                                                                                                    Duration="0:0:0.15" />
+                                                                                            </Storyboard>
+                                                                                        </BeginStoryboard>
+                                                                                    </Trigger.ExitActions>
+                                                                                </Trigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </TextBlock.Style>
+                                                                    <TextBlock.ToolTip>
+                                                                        <ToolTip Content="Double-click to edit" />
+                                                                    </TextBlock.ToolTip>
+                                                                </TextBlock>
+
+
+                                                                <Border
+                                                                    Padding="8,4"
+                                                                    Background="{StaticResource DarkBg}"
+                                                                    BorderBrush="{StaticResource Accent}"
+                                                                    BorderThickness="2"
+                                                                    CornerRadius="6"
+                                                                    Opacity="0">
+                                                                    <Border.Style>
+                                                                        <Style TargetType="Border">
+                                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                                    <DataTrigger.EnterActions>
+                                                                                        <BeginStoryboard>
+                                                                                            <Storyboard>
+                                                                                                <DoubleAnimation
+                                                                                                    Storyboard.TargetProperty="Opacity"
+                                                                                                    From="0"
+                                                                                                    To="1"
+                                                                                                    Duration="0:0:0.2">
+                                                                                                    <DoubleAnimation.EasingFunction>
+                                                                                                        <CubicEase EasingMode="EaseOut" />
+                                                                                                    </DoubleAnimation.EasingFunction>
+                                                                                                </DoubleAnimation>
+                                                                                            </Storyboard>
+                                                                                        </BeginStoryboard>
+                                                                                    </DataTrigger.EnterActions>
+                                                                                    <DataTrigger.ExitActions>
+                                                                                        <BeginStoryboard>
+                                                                                            <Storyboard>
+                                                                                                <DoubleAnimation
+                                                                                                    Storyboard.TargetProperty="Opacity"
+                                                                                                    To="0"
+                                                                                                    Duration="0:0:0.15" />
+                                                                                            </Storyboard>
+                                                                                        </BeginStoryboard>
+                                                                                    </DataTrigger.ExitActions>
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </Border.Style>
+                                                                    <TextBox
+                                                                        Padding="0"
+                                                                        VerticalAlignment="Center"
+                                                                        Background="Transparent"
+                                                                        BorderThickness="0"
+                                                                        CaretBrush="{StaticResource Accent}"
+                                                                        FontSize="14"
+                                                                        FontWeight="Medium"
+                                                                        Foreground="{StaticResource Text}"
+                                                                        KeyDown="GameNameEdit_KeyDown"
+                                                                        Loaded="GameNameEdit_Loaded"
+                                                                        LostFocus="GameNameEdit_LostFocus"
+                                                                        Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" />
+                                                                </Border>
+                                                            </Grid>
+
                                                             <TextBlock
-                                                                FontSize="14"
-                                                                FontWeight="Medium"
-                                                                Foreground="{StaticResource Text}"
-                                                                Text="{Binding Name}"
-                                                                TextTrimming="CharacterEllipsis" />
-                                                            <TextBlock
-                                                                Margin="0,2,0,0"
+                                                                Margin="0,4,0,0"
                                                                 FontSize="11"
                                                                 Foreground="{StaticResource TextSecond}"
                                                                 Text="{Binding Type}" />
@@ -1642,8 +1757,18 @@
                                                             Grid.Column="2"
                                                             Click="RemoveGameButton_Click"
                                                             Content="REMOVE"
-                                                            Style="{StaticResource RemoveBtn}"
-                                                            Tag="{Binding}" />
+                                                            Tag="{Binding}">
+                                                            <Button.Style>
+                                                                <Style BasedOn="{StaticResource RemoveBtn}" TargetType="Button">
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding IsEditing}" Value="True">
+                                                                            <Setter Property="Opacity" Value="0.3" />
+                                                                            <Setter Property="IsEnabled" Value="False" />
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </Button.Style>
+                                                        </Button>
                                                     </Grid>
                                                 </Border>
                                             </DataTemplate>
@@ -1843,3 +1968,4 @@
         </Border>
     </Grid>
 </Window>
+

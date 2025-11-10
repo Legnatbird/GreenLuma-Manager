@@ -26,6 +26,7 @@ public partial class MainWindow
 
     private Config? _config;
     private Profile? _currentProfile;
+    private string? _editingOriginalName;
     private DispatcherTimer? _loadingDotsTimer;
     private CancellationTokenSource? _searchCts;
 
@@ -1184,6 +1185,98 @@ public partial class MainWindow
                 "Stealth Warning",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
+    }
+
+    private void GameName_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount != 2 || sender is not TextBlock textBlock || textBlock.DataContext is not Game game)
+            return;
+
+        if (game.IsEditing)
+            return;
+
+        _editingOriginalName = game.Name;
+        game.IsEditing = true;
+        e.Handled = true;
+    }
+
+    private void GameNameEdit_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox textBox)
+        {
+            textBox.Focus();
+            textBox.SelectAll();
+        }
+    }
+
+    private void GameNameEdit_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox textBox || textBox.DataContext is not Game game)
+            return;
+
+        if (e.Key == Key.Enter)
+        {
+            CommitNameEdit(game, textBox.Text);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            CancelNameEdit(game);
+            e.Handled = true;
+        }
+    }
+
+    private void GameNameEdit_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox { DataContext: Game { IsEditing: true } game } textBox)
+            CommitNameEdit(game, textBox.Text);
+    }
+
+    private void CommitNameEdit(Game game, string newName)
+    {
+        var trimmedName = newName.Trim();
+
+        if (trimmedName == _editingOriginalName)
+        {
+            game.IsEditing = false;
+            _editingOriginalName = null;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(trimmedName))
+        {
+            ShowToast("Game name cannot be empty", false);
+            game.Name = _editingOriginalName ?? game.Name;
+            game.IsEditing = false;
+            _editingOriginalName = null;
+            return;
+        }
+
+        if (trimmedName.Length > 200)
+        {
+            ShowToast("Game name is too long", false);
+            game.Name = _editingOriginalName ?? game.Name;
+            game.IsEditing = false;
+            _editingOriginalName = null;
+            return;
+        }
+
+        game.Name = trimmedName;
+        game.IsEditing = false;
+        _editingOriginalName = null;
+        SaveCurrentProfile();
+        ShowToast("Game name updated");
+    }
+
+    private void CancelNameEdit(Game game)
+    {
+        if (_editingOriginalName != null)
+        {
+            game.Name = _editingOriginalName;
+            _editingOriginalName = null;
+        }
+
+        game.IsEditing = false;
     }
 
     private class RelayCommand(Action<object?> execute, Func<object?, bool>? canExecute = null) : ICommand
