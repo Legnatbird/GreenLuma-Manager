@@ -806,6 +806,168 @@ public partial class MainWindow
         ShowToast($"Exported '{_currentProfile.Name}'");
     }
 
+    private async void LoadAppListButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (_config == null)
+            {
+                ShowToast("Configure paths in Settings first", false);
+                return;
+            }
+
+            var greenLumaAppListPath = !string.IsNullOrWhiteSpace(_config.GreenLumaPath)
+                ? Path.Combine(_config.GreenLumaPath, "AppList")
+                : null;
+
+            if (greenLumaAppListPath == null || !Directory.Exists(greenLumaAppListPath) ||
+                Directory.GetFiles(greenLumaAppListPath, "*.txt").Length == 0)
+            {
+                ShowToast("No AppList found in the GreenLuma folder.", false);
+                return;
+            }
+
+            var appIds = new HashSet<string>();
+            try
+            {
+                foreach (var file in Directory.GetFiles(greenLumaAppListPath, "*.txt"))
+                {
+                    var id = (await File.ReadAllTextAsync(file)).Trim();
+                    if (!string.IsNullOrWhiteSpace(id)) appIds.Add(id);
+                }
+            }
+            catch
+            {
+                ShowToast("Failed to read AppList files.", false);
+                return;
+            }
+
+            if (appIds.Count == 0)
+            {
+                ShowToast("No games found in AppList.", false);
+                return;
+            }
+
+            if (_currentProfile == null)
+            {
+                ShowToast("No profile selected.", false);
+                return;
+            }
+
+            var existingAppIds = new HashSet<string>(_games.Select(g => g.AppId));
+            var newAppIds = appIds.Where(id => !existingAppIds.Contains(id)).ToList();
+
+            if (newAppIds.Count == 0)
+            {
+                ShowToast("All AppList games are already in this profile.");
+                return;
+            }
+
+            var confirmResult = CustomMessageBox.Show(
+                $"Found {newAppIds.Count} new game(s). Would you like to add them to the '{_currentProfile.Name}' profile?",
+                "Load AppList",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (confirmResult != MessageBoxResult.Yes) return;
+
+            ShowToast($"Importing {newAppIds.Count} game(s)...");
+
+            var importedGames = new List<Game>();
+            var semaphore = new SemaphoreSlim(6);
+            var tasks = new List<Task>();
+
+            foreach (var id in newAppIds)
+            {
+                await semaphore.WaitAsync();
+                tasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        var searchResults = await SearchService.SearchAsync(id);
+                        var game = searchResults.FirstOrDefault(g => g.AppId == id) ??
+                                   new Game { AppId = id, Name = $"App {id}", Type = "Game" };
+
+                        if (string.IsNullOrWhiteSpace(game.IconUrl))
+                        {
+                            await SearchService.FetchIconUrlAsync(game);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(game.IconUrl))
+                        {
+                            var localPath = await IconCacheService.DownloadAndCacheIconAsync(game.AppId, game.IconUrl);
+                            if (!string.IsNullOrEmpty(localPath))
+                            {
+                                game.IconUrl = localPath;
+                            }
+                        }
+
+                        lock (importedGames)
+                        {
+                            importedGames.Add(game);
+                        }
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                }));
+            }
+
+            await Task.WhenAll(tasks);
+
+            foreach (var game in importedGames.OrderBy(g => g.Name))
+            {
+                _games.Add(game);
+            }
+
+            SaveCurrentProfile();
+            UpdateGameListState();
+            ShowToast($"Successfully added {importedGames.Count} game(s) to '{_currentProfile.Name}'.");
+        }
+        catch
+        {
+            // ignored
+        }
+    }
+
+    private void ClearProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentProfile == null)
+        {
+            ShowToast("No profile selected", false);
+            return;
+        }
+
+        if (_games.Count == 0)
+        {
+            ShowToast("Profile is already empty");
+            return;
+        }
+
+        var result = CustomMessageBox.Show(
+            $"Remove all {_games.Count} game(s) from '{_currentProfile.Name}'?",
+            "Clear Profile",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Exclamation);
+
+        if (result != MessageBoxResult.Yes) return;
+
+        foreach (var game in _games.ToList())
+        {
+            IconCacheService.DeleteCachedIcon(game.AppId);
+        }
+
+        _games.Clear();
+        SaveCurrentProfile();
+        UpdateGameListState();
+        ShowToast($"Profile '{_currentProfile.Name}' cleared");
+    }
+
     private void DeleteProfileButton_Click(object sender, RoutedEventArgs e)
     {
         if (_currentProfile == null || _currentProfile.Name.Equals("default", StringComparison.OrdinalIgnoreCase))

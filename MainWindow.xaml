@@ -1459,6 +1459,20 @@
                                         </MenuItem>
 
                                         <MenuItem
+                                            Click="LoadAppListButton_Click"
+                                            Header="Load AppList"
+                                            Style="{StaticResource ContextItem}">
+                                            <MenuItem.Icon>
+                                                <Path
+                                                    Width="16"
+                                                    Height="16"
+                                                    Data="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"
+                                                    Fill="{StaticResource TextSecond}"
+                                                    Stretch="Uniform" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
+
+                                        <MenuItem
                                             Click="ExportProfileButton_Click"
                                             Header="Export Profile"
                                             Style="{StaticResource ContextItem}">
@@ -1488,6 +1502,20 @@
                                                 </Style>
                                             </Separator.Style>
                                         </Separator>
+
+                                        <MenuItem
+                                            Click="ClearProfileButton_Click"
+                                            Header="Clear Profile"
+                                            Style="{StaticResource DangerItem}">
+                                            <MenuItem.Icon>
+                                                <Path
+                                                    Width="16"
+                                                    Height="16"
+                                                    Data="M19.36,2.72L20.78,4.14L15.06,9.85C16.13,11.39 16.28,13.24 15.38,14.44L9.06,8.12C10.26,7.22 12.11,7.37 13.65,8.44L19.36,2.72M5.93,17.57C3.92,15.56 2.69,13.16 2.35,10.92L7.23,8.83L14.67,16.27L12.58,21.15C10.34,20.81 7.94,19.58 5.93,17.57Z"
+                                                    Fill="{StaticResource Danger}"
+                                                    Stretch="Uniform" />
+                                            </MenuItem.Icon>
+                                        </MenuItem>
 
                                         <MenuItem
                                             Margin="0,0,0,2"
