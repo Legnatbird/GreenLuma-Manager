@@ -7,6 +7,8 @@ namespace GreenLuma_Manager.Services;
 public class SearchService
 {
     private const string SteamAppListUrl = "https://api.steampowered.com/ISteamApps/GetAppList/v2/";
+    private const string SteamStoreApiUrl = "https://api.steampowered.com/IStoreService/GetAppList/v1/";
+    private const string SteamApiKey = "1DD0450A99F573693CD031EBB160907D";
     private const string SteamAppDetailsUrl = "https://store.steampowered.com/api/appdetails?appids={0}&l=english";
     private const int MaxConcurrentRequests = 8;
     private static readonly HttpClient Client = new();
@@ -14,9 +16,7 @@ public class SearchService
     private static readonly Dictionary<string, GameDetails> DetailsCache = [];
     private static DateTime _cacheExpiry = DateTime.MinValue;
     private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(24);
-    private static readonly char[] NameSeparators = [' ', '-', ':', '_', '™', '®'];
-    private static readonly char[] SpaceSeparator = [' '];
-    private static readonly char[] WordSeparators = [' ', '-', ':', '_'];
+    private static bool _useV2Api = true;
 
     static SearchService()
     {
@@ -30,32 +30,91 @@ public class SearchService
         if (_appListCache != null && DateTime.Now < _cacheExpiry)
             return _appListCache;
 
-        try
-        {
-            var response = await Client.GetStringAsync(SteamAppListUrl);
-            var json = JObject.Parse(response);
-            var apps = json["applist"]?["apps"];
-
-            if (apps != null)
+        if (_useV2Api)
+            try
             {
-                _appListCache =
-                [
-                    .. apps
-                        .Select(app => new SteamApp(
-                            app["appid"]?.ToString() ?? string.Empty,
-                            app["name"]?.ToString() ?? string.Empty))
-                        .Where(app => !string.IsNullOrWhiteSpace(app.AppId) &&
-                                      !string.IsNullOrWhiteSpace(app.Name))
-                ];
+                var response = await Client.GetStringAsync(SteamAppListUrl);
+                var json = JObject.Parse(response);
+                var apps = json["applist"]?["apps"];
+
+                if (apps != null)
+                {
+                    _appListCache =
+                    [
+                        .. apps
+                            .Select(app => new SteamApp(
+                                app["appid"]?.ToString() ?? string.Empty,
+                                app["name"]?.ToString() ?? string.Empty))
+                            .Where(app => !string.IsNullOrWhiteSpace(app.AppId) &&
+                                          !string.IsNullOrWhiteSpace(app.Name))
+                    ];
+
+                    _cacheExpiry = DateTime.Now.Add(CacheDuration);
+                    return _appListCache;
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                Console.WriteLine($"V2 API unavailable: {ex.Message}, falling back to V1");
+                _useV2Api = false;
+            }
+            catch (TaskCanceledException)
+            {
+                Console.WriteLine("V2 API timeout, falling back to V1");
+                _useV2Api = false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"V2 API error: {ex.Message}, falling back to V1");
+                _useV2Api = false;
+            }
+
+        if (!_useV2Api)
+            try
+            {
+                _appListCache = [];
+                uint lastAppId = 0;
+                const int maxResults = 50000;
+
+                while (true)
+                {
+                    var url =
+                        $"{SteamStoreApiUrl}?key={SteamApiKey}&include_games=true&include_dlc=true&include_software=true&include_videos=true&include_hardware=true&max_results={maxResults}&last_appid={lastAppId}";
+
+                    var response = await Client.GetStringAsync(url);
+                    var json = JObject.Parse(response);
+                    var apps = json["response"]?["apps"];
+
+                    if (apps == null || !apps.Any())
+                        break;
+
+                    foreach (var app in apps)
+                    {
+                        var appId = app["appid"]?.ToString() ?? string.Empty;
+                        var name = app["name"]?.ToString() ?? string.Empty;
+
+                        if (!string.IsNullOrWhiteSpace(appId) && !string.IsNullOrWhiteSpace(name))
+                            _appListCache.Add(new SteamApp(appId, name));
+                    }
+
+                    var haveMore = json["response"]?["have_more_results"]?.Value<bool>() ?? false;
+                    if (!haveMore)
+                        break;
+
+                    var lastAppIdFromResponse = json["response"]?["last_appid"]?.Value<uint>();
+                    if (lastAppIdFromResponse.HasValue)
+                        lastAppId = lastAppIdFromResponse.Value;
+                    else
+                        break;
+                }
 
                 _cacheExpiry = DateTime.Now.Add(CacheDuration);
                 return _appListCache;
             }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error loading app list: {ex.Message}");
-        }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"V1 API error: {ex.Message}");
+            }
 
         return _appListCache ?? [];
     }
@@ -68,8 +127,11 @@ public class SearchService
         try
         {
             var appList = await GetAppListAsync();
-            var queryLower = query.ToLower();
 
+            if (appList.Count == 0)
+                return [];
+
+            var queryLower = query.ToLower();
             var matches = appList
                 .Select(app => (app, score: CalculateScore(app.Name, queryLower)))
                 .Where(x => x.score > 0)
@@ -84,7 +146,6 @@ public class SearchService
                 .ToList();
 
             await FetchTypesForGamesAsync(matches);
-
             return matches;
         }
         catch (Exception ex)
@@ -108,9 +169,9 @@ public class SearchService
         if (nameLower.StartsWith(query))
             score += 5000;
 
-        var nameWords = nameLower.Split(NameSeparators,
+        var nameWords = nameLower.Split([' ', '-', ':', '_', '™', '®'],
             StringSplitOptions.RemoveEmptyEntries);
-        var queryWords = query.Split(SpaceSeparator,
+        var queryWords = query.Split([' '],
             StringSplitOptions.RemoveEmptyEntries);
 
         if (nameWords.Length > 0 && nameWords[0].StartsWith(query))
@@ -139,7 +200,7 @@ public class SearchService
 
     private static bool HasWordBoundaryMatch(string name, string query)
     {
-        var words = name.Split(WordSeparators,
+        var words = name.Split([' ', '-', ':', '_'],
             StringSplitOptions.RemoveEmptyEntries);
         return words.Any(w => w.StartsWith(query));
     }
@@ -147,11 +208,9 @@ public class SearchService
     private static bool ContainsAllCharsInOrder(string text, string chars)
     {
         var charIndex = 0;
-
         foreach (var c in text)
             if (charIndex < chars.Length && c == chars[charIndex])
                 charIndex++;
-
         return charIndex == chars.Length;
     }
 
@@ -391,20 +450,15 @@ public class SearchService
         [
             $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg",
             $"https://cdn.akamai.steamstatic.com/steam/apps/{appId}/header.jpg",
-            $"https://steamcdn-a.akamaihd.net/steam/apps/{appId}/header.jpg",
-            $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/capsule_231x87.jpg",
-            $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/capsule_616x353.jpg",
-            $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/library_600x900.jpg"
+            $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/capsule_231x87.jpg"
         ];
-        foreach (var url in cdnUrls.Distinct())
+
+        foreach (var url in cdnUrls)
             try
             {
                 var head = new HttpRequestMessage(HttpMethod.Head, url);
                 var headResp = await Client.SendAsync(head);
                 if (headResp.IsSuccessStatusCode)
-                    return url;
-                var getResp = await Client.GetAsync(url);
-                if (getResp.IsSuccessStatusCode)
                     return url;
             }
             catch
@@ -445,8 +499,8 @@ public class SearchService
     public static async Task FetchIconUrlsAsync(List<Game> games)
     {
         var gamesWithoutIcons = games.Where(g => string.IsNullOrEmpty(g.IconUrl)).ToList();
-
-        if (gamesWithoutIcons.Count > 0) await FetchBatchDetailsAsync(gamesWithoutIcons);
+        if (gamesWithoutIcons.Count > 0)
+            await FetchBatchDetailsAsync(gamesWithoutIcons);
     }
 
     private class SteamApp(string appId, string name)
