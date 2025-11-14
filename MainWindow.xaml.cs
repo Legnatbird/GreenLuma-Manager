@@ -1,5 +1,4 @@
 ﻿using System.Collections.ObjectModel;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Windows;
@@ -398,7 +397,14 @@ public partial class MainWindow
 
         foreach (var game in results) _searchResults.Add(game);
 
-        SortResultsByName();
+        DgResults.Items.SortDescriptions.Clear();
+
+        foreach (var column in DgResults.Columns)
+        {
+            column.SortDirection = null;
+            column.CanUserSort = false;
+        }
+
         TxtResultCount.Text = _searchResults.Count.ToString();
         _loadingDotsTimer?.Stop();
 
@@ -415,17 +421,6 @@ public partial class MainWindow
         };
 
         PnlSearchLoading.BeginAnimation(OpacityProperty, fadeOut);
-    }
-
-    private void SortResultsByName()
-    {
-        DgResults.Items.SortDescriptions.Clear();
-        DgResults.Items.SortDescriptions.Add(new SortDescription("Name", ListSortDirection.Ascending));
-
-        foreach (var column in DgResults.Columns) column.SortDirection = null;
-
-        var nameColumn = DgResults.Columns.FirstOrDefault(c => c.Header?.ToString() == "NAME");
-        if (nameColumn != null) nameColumn.SortDirection = ListSortDirection.Ascending;
     }
 
     private void ShowResultsGrid()
