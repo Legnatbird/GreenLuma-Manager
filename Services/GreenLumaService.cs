@@ -24,56 +24,38 @@ public partial class GreenLumaService
                Directory.GetFiles(appListPath, "*.txt").Length > 0;
     }
 
-    public static async Task<bool> GenerateAppListAsync(Profile profile, Config config)
+    public static async Task<bool> GenerateAppListAsync(Profile? profile, Config? config)
     {
-        return await Task.Run(() =>
-        {
-            try
-            {
-                if (!ValidateGreenLumaPath(config.GreenLumaPath))
-                    return false;
-
-                var appListPath = Path.Combine(config.GreenLumaPath, "AppList");
-
-                RecreateAppListDirectory(appListPath);
-                WriteAppListFiles(profile, appListPath);
-                UpdateInjectorIni(config);
-
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        });
-    }
-
-    private static bool ValidateGreenLumaPath(string greenLumaPath)
-    {
-        if (string.IsNullOrWhiteSpace(greenLumaPath))
+        if (profile == null || config == null || string.IsNullOrWhiteSpace(config.GreenLumaPath))
             return false;
 
-        return Directory.Exists(greenLumaPath);
-    }
-
-    private static void RecreateAppListDirectory(string appListPath)
-    {
-        if (Directory.Exists(appListPath)) Directory.Delete(appListPath, true);
-
-        Directory.CreateDirectory(appListPath);
-    }
-
-    private static void WriteAppListFiles(Profile profile, string appListPath)
-    {
-        var appIds = profile.Games
-            .Select(g => g.AppId)
-            .Distinct()
-            .ToList();
-
-        for (var i = 0; i < appIds.Count; i++)
+        try
         {
-            var filePath = Path.Combine(appListPath, $"{i}.txt");
-            File.WriteAllText(filePath, appIds[i]);
+            var appListPath = Path.Combine(config.GreenLumaPath, "AppList");
+            Directory.CreateDirectory(appListPath);
+
+            foreach (var file in Directory.GetFiles(appListPath, "*.txt"))
+                File.Delete(file);
+
+            var allAppIds = new List<string>();
+
+            foreach (var game in profile.Games)
+            {
+                allAppIds.Add(game.AppId);
+                allAppIds.AddRange(game.Depots);
+            }
+
+            for (var i = 0; i < allAppIds.Count; i++)
+            {
+                var filePath = Path.Combine(appListPath, $"{i}.txt");
+                await File.WriteAllTextAsync(filePath, allAppIds[i]);
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 

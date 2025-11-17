@@ -38,6 +38,8 @@ public class Game : INotifyPropertyChanged
         }
     } = string.Empty;
 
+    [DataMember] public List<string> Depots { get; set; } = [];
+
     [IgnoreDataMember]
     public bool IsEditing
     {
