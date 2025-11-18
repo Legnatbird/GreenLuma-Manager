@@ -1,7 +1,7 @@
 ﻿using System.IO;
 using System.Runtime.Loader;
-using System.Text.Json;
 using System.Text;
+using System.Text.Json;
 using GreenLuma_Manager.Models;
 using GreenLuma_Manager.Plugins;
 
@@ -241,7 +241,6 @@ public class PluginService
             SavePluginInfos();
 
             if (File.Exists(pluginPath))
-            {
                 try
                 {
                     File.Delete(pluginPath);
@@ -250,7 +249,6 @@ public class PluginService
                 {
                     MarkForDeletion(pluginPath);
                 }
-            }
         }
         catch
         {
@@ -309,7 +307,6 @@ public class PluginService
             var remaining = new List<string>();
 
             foreach (var path in paths)
-            {
                 try
                 {
                     if (File.Exists(path)) File.Delete(path);
@@ -318,7 +315,6 @@ public class PluginService
                 {
                     remaining.Add(path);
                 }
-            }
 
             if (remaining.Count > 0)
                 SavePendingDeletes(remaining);

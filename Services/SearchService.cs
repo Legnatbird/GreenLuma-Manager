@@ -74,7 +74,6 @@ public class SearchService
             return _appListCache;
 
         if (_useV2Api)
-        {
             try
             {
                 var response = await Client.GetStringAsync(SteamAppListUrl);
@@ -100,10 +99,8 @@ public class SearchService
             {
                 _useV2Api = false;
             }
-        }
 
         if (!_useV2Api)
-        {
             try
             {
                 _appListCache = [];
@@ -149,7 +146,6 @@ public class SearchService
             {
                 // ignored
             }
-        }
 
         return _appListCache ?? [];
     }
@@ -180,17 +176,15 @@ public class SearchService
                         var details = json["data"];
                         var appName = details!["name"]?.ToString() ?? string.Empty;
                         if (!string.IsNullOrWhiteSpace(appName))
-                        {
                             return
                             [
-                                new()
+                                new Game
                                 {
                                     AppId = query,
                                     Name = appName,
                                     Type = MapSteamTypeToDisplayType(details["type"]?.ToString() ?? "game")
                                 }
                             ];
-                        }
                     }
                 }
 
@@ -375,7 +369,6 @@ public class SearchService
     private static void ApplyCachedDetails(List<Game> games)
     {
         foreach (var game in games)
-        {
             if (DetailsCache.TryGetValue(game.AppId, out var details))
             {
                 if (details.Name != $"App {game.AppId}")
@@ -385,7 +378,6 @@ public class SearchService
                 if (!string.IsNullOrEmpty(details.IconUrl))
                     game.IconUrl = details.IconUrl;
             }
-        }
     }
 
     private static async Task<GameDetails> FetchGameDetailsAsync(string appId)
@@ -438,7 +430,6 @@ public class SearchService
         ];
 
         foreach (var url in cdnUrls)
-        {
             try
             {
                 var head = new HttpRequestMessage(HttpMethod.Head, url);
@@ -450,7 +441,6 @@ public class SearchService
             {
                 // ignored
             }
-        }
 
         return null;
     }
