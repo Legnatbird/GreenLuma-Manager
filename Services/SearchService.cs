@@ -64,8 +64,7 @@ public class SearchService
 
     static SearchService()
     {
-        Client.DefaultRequestHeaders.Add("User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
+        Client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         Client.Timeout = TimeSpan.FromSeconds(30);
     }
 
@@ -75,6 +74,7 @@ public class SearchService
             return _appListCache;
 
         if (_useV2Api)
+        {
             try
             {
                 var response = await Client.GetStringAsync(SteamAppListUrl);
@@ -89,31 +89,21 @@ public class SearchService
                             .Select(app => new SteamApp(
                                 app["appid"]?.ToString() ?? string.Empty,
                                 app["name"]?.ToString() ?? string.Empty))
-                            .Where(app => !string.IsNullOrWhiteSpace(app.AppId) &&
-                                          !string.IsNullOrWhiteSpace(app.Name))
+                            .Where(app => !string.IsNullOrWhiteSpace(app.AppId) && !string.IsNullOrWhiteSpace(app.Name))
                     ];
 
                     _cacheExpiry = DateTime.Now.Add(CacheDuration);
                     return _appListCache;
                 }
             }
-            catch (HttpRequestException ex)
+            catch
             {
-                Console.WriteLine($"V2 API unavailable: {ex.Message}, falling back to V1");
                 _useV2Api = false;
             }
-            catch (TaskCanceledException)
-            {
-                Console.WriteLine("V2 API timeout, falling back to V1");
-                _useV2Api = false;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"V2 API error: {ex.Message}, falling back to V1");
-                _useV2Api = false;
-            }
+        }
 
         if (!_useV2Api)
+        {
             try
             {
                 _appListCache = [];
@@ -155,10 +145,11 @@ public class SearchService
                 _cacheExpiry = DateTime.Now.Add(CacheDuration);
                 return _appListCache;
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine($"V1 API error: {ex.Message}");
+                // ignored
             }
+        }
 
         return _appListCache ?? [];
     }
@@ -175,8 +166,8 @@ public class SearchService
                 return [];
 
             var queryLower = query.ToLower();
-
             var cacheKey = $"search:{queryLower}:{maxResults}";
+
             var cached = await SteamApiCache.GetOrAddAsync(cacheKey, async () =>
             {
                 if (uint.TryParse(query, out _))
@@ -190,21 +181,20 @@ public class SearchService
                         var appName = details!["name"]?.ToString() ?? string.Empty;
                         if (!string.IsNullOrWhiteSpace(appName))
                         {
-                            var result = new List<Game>
-                            {
+                            return
+                            [
                                 new()
                                 {
                                     AppId = query,
                                     Name = appName,
                                     Type = MapSteamTypeToDisplayType(details["type"]?.ToString() ?? "game")
                                 }
-                            };
-                            return result;
+                            ];
                         }
                     }
                 }
 
-                var matches = appList
+                return appList
                     .Select(app => (app, score: CalculateScore(app.Name, queryLower)))
                     .Where(x => x.score > 0)
                     .OrderByDescending(x => x.score)
@@ -216,8 +206,6 @@ public class SearchService
                         Type = "Game"
                     })
                     .ToList();
-
-                return matches;
             });
 
             return
@@ -245,16 +233,13 @@ public class SearchService
         if (nameLower.StartsWith(query))
             score += 5000;
 
-        var nameWords = nameLower.Split([' ', '-', ':', '_', '™', '®'],
-            StringSplitOptions.RemoveEmptyEntries);
-        var queryWords = query.Split([' '],
-            StringSplitOptions.RemoveEmptyEntries);
+        var nameWords = nameLower.Split([' ', '-', ':', '_', '™', '®'], StringSplitOptions.RemoveEmptyEntries);
+        var queryWords = query.Split([' '], StringSplitOptions.RemoveEmptyEntries);
 
         if (nameWords.Length > 0 && nameWords[0].StartsWith(query))
             score += 3000;
 
-        var matchingWords = queryWords.Count(queryWord =>
-            nameWords.Any(w => w.StartsWith(queryWord)));
+        var matchingWords = queryWords.Count(queryWord => nameWords.Any(w => w.StartsWith(queryWord)));
 
         if (queryWords.Length > 1 && matchingWords == queryWords.Length)
             score += 2000;
@@ -276,8 +261,7 @@ public class SearchService
 
     private static bool HasWordBoundaryMatch(string name, string query)
     {
-        var words = name.Split([' ', '-', ':', '_'],
-            StringSplitOptions.RemoveEmptyEntries);
+        var words = name.Split([' ', '-', ':', '_'], StringSplitOptions.RemoveEmptyEntries);
         return words.Any(w => w.StartsWith(query));
     }
 
@@ -322,7 +306,9 @@ public class SearchService
                         {
                             try
                             {
-                                game.Name = details.Name;
+                                if (details.Name != $"App {game.AppId}")
+                                    game.Name = details.Name;
+
                                 game.Type = details.Type;
                                 game.IconUrl = details.IconUrl;
                                 tcs.SetResult(true);
@@ -336,7 +322,9 @@ public class SearchService
                     }
                     else
                     {
-                        game.Name = details.Name;
+                        if (details.Name != $"App {game.AppId}")
+                            game.Name = details.Name;
+
                         game.Type = details.Type;
                         game.IconUrl = details.IconUrl;
                     }
@@ -351,7 +339,6 @@ public class SearchService
                         {
                             try
                             {
-                                game.Name = $"App {game.AppId}";
                                 game.Type = "Game";
                                 tcs.SetResult(true);
                             }
@@ -364,7 +351,6 @@ public class SearchService
                     }
                     else
                     {
-                        game.Name = $"App {game.AppId}";
                         game.Type = "Game";
                     }
                 }
@@ -389,18 +375,23 @@ public class SearchService
     private static void ApplyCachedDetails(List<Game> games)
     {
         foreach (var game in games)
+        {
             if (DetailsCache.TryGetValue(game.AppId, out var details))
             {
-                game.Name = details.Name;
+                if (details.Name != $"App {game.AppId}")
+                    game.Name = details.Name;
+
                 game.Type = details.Type;
-                if (!string.IsNullOrEmpty(details.IconUrl)) game.IconUrl = details.IconUrl;
+                if (!string.IsNullOrEmpty(details.IconUrl))
+                    game.IconUrl = details.IconUrl;
             }
+        }
     }
 
     private static async Task<GameDetails> FetchGameDetailsAsync(string appId)
     {
         var key = $"details:{appId}";
-        var result = await SteamApiCache.GetOrAddAsync(key, async () =>
+        return await SteamApiCache.GetOrAddAsync(key, async () =>
         {
             try
             {
@@ -419,9 +410,7 @@ public class SearchService
 
                         var headerImage = data["header_image"]?.ToString();
                         var capsuleImage = data["capsule_image"]?.ToString();
-                        var iconUrl = !string.IsNullOrEmpty(headerImage)
-                            ? headerImage
-                            : capsuleImage ?? string.Empty;
+                        var iconUrl = !string.IsNullOrEmpty(headerImage) ? headerImage : capsuleImage ?? string.Empty;
 
                         if (!string.IsNullOrEmpty(iconUrl))
                             return new GameDetails(type, iconUrl, name);
@@ -431,15 +420,12 @@ public class SearchService
                 var fallbackIconUrl = await TryGetCdnImageAsync(appId);
                 return new GameDetails("Game", fallbackIconUrl ?? string.Empty, $"App {appId}");
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine($"Error fetching details for {appId}: {ex.Message}");
                 var fallbackIconUrl = await TryGetCdnImageAsync(appId);
                 return new GameDetails("Game", fallbackIconUrl ?? string.Empty, $"App {appId}");
             }
         });
-
-        return result;
     }
 
     private static async Task<string?> TryGetCdnImageAsync(string appId)
@@ -452,6 +438,7 @@ public class SearchService
         ];
 
         foreach (var url in cdnUrls)
+        {
             try
             {
                 var head = new HttpRequestMessage(HttpMethod.Head, url);
@@ -463,6 +450,7 @@ public class SearchService
             {
                 // ignored
             }
+        }
 
         return null;
     }
@@ -487,7 +475,8 @@ public class SearchService
     public static async Task PopulateGameDetailsAsync(Game game)
     {
         var details = await FetchGameDetailsAsync(game.AppId);
-        game.Name = details.Name;
+        if (details.Name != $"App {game.AppId}")
+            game.Name = details.Name;
         game.Type = details.Type;
         game.IconUrl = details.IconUrl;
     }
