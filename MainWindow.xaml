@@ -1560,13 +1560,34 @@
                         </Grid>
 
                         <Border
+                            x:Name="MainGameListContainer"
                             Grid.Row="1"
                             Background="{StaticResource DarkBg}"
                             BorderBrush="{StaticResource Border}"
                             BorderThickness="1"
                             CornerRadius="12">
                             <Grid>
-                                <ScrollViewer VerticalScrollBarVisibility="Hidden">
+                                <Grid.OpacityMask>
+                                    <VisualBrush>
+                                        <VisualBrush.Visual>
+                                            <Border
+                                                Width="{Binding ActualWidth, ElementName=MainGameListContainer}"
+                                                Height="{Binding ActualHeight, ElementName=MainGameListContainer}"
+                                                Background="Black"
+                                                CornerRadius="{Binding CornerRadius, ElementName=MainGameListContainer}" />
+                                        </VisualBrush.Visual>
+                                    </VisualBrush>
+                                </Grid.OpacityMask>
+
+                                <ScrollViewer Focusable="False" VerticalScrollBarVisibility="Auto">
+                                    <ScrollViewer.Resources>
+                                        <ResourceDictionary>
+                                            <ResourceDictionary.MergedDictionaries>
+                                                <ResourceDictionary Source="pack://application:,,,/PresentationFramework.Fluent;component/Themes/Fluent.Dark.xaml" />
+                                            </ResourceDictionary.MergedDictionaries>
+                                        </ResourceDictionary>
+                                    </ScrollViewer.Resources>
+
                                     <ItemsControl x:Name="LstGames" Margin="12">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate DataType="{x:Type models:Game}">
