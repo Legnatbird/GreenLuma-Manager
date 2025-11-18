@@ -51,9 +51,14 @@ public static class SteamApiCache
 public class SearchService
 {
     private const string SteamAppListUrl = "https://api.steampowered.com/ISteamApps/GetAppList/v2/";
+
+    private const string SteamStoreSearchUrl =
+        "https://store.steampowered.com/api/storesearch/?term={0}&l=english&cc=US";
+
     private const string SteamStoreApiUrl = "https://api.steampowered.com/IStoreService/GetAppList/v1/";
     private const string SteamApiKey = "1DD0450A99F573693CD031EBB160907D";
     private const string SteamAppDetailsUrl = "https://store.steampowered.com/api/appdetails?appids={0}&l=english";
+
     private const int MaxConcurrentRequests = 8;
     private static readonly HttpClient Client = new();
     private static List<SteamApp>? _appListCache;
@@ -66,6 +71,43 @@ public class SearchService
     {
         Client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         Client.Timeout = TimeSpan.FromSeconds(30);
+    }
+
+    private static async Task<List<Game>> SearchStoreAsync(string query)
+    {
+        try
+        {
+            var url = string.Format(SteamStoreSearchUrl, Uri.EscapeDataString(query));
+            var response = await Client.GetStringAsync(url);
+            var json = JObject.Parse(response);
+
+            var items = json["items"];
+            if (items == null) return [];
+
+            var results = new List<Game>();
+
+            foreach (var item in items)
+            {
+                var appId = item["id"]?.ToString();
+                var name = item["name"]?.ToString();
+                var tinyImage = item["tiny_image"]?.ToString();
+
+                if (!string.IsNullOrEmpty(appId) && !string.IsNullOrEmpty(name))
+                    results.Add(new Game
+                    {
+                        AppId = appId,
+                        Name = name,
+                        Type = "Game",
+                        IconUrl = tinyImage ?? string.Empty
+                    });
+            }
+
+            return results;
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     private static async Task<List<SteamApp>> GetAppListAsync()
@@ -157,10 +199,6 @@ public class SearchService
 
         try
         {
-            var appList = await GetAppListAsync();
-            if (appList.Count == 0)
-                return [];
-
             var queryLower = query.ToLower();
             var cacheKey = $"search:{queryLower}:{maxResults}";
 
@@ -188,18 +226,48 @@ public class SearchService
                     }
                 }
 
-                return appList
-                    .Select(app => (app, score: CalculateScore(app.Name, queryLower)))
-                    .Where(x => x.score > 0)
-                    .OrderByDescending(x => x.score)
-                    .Take(maxResults)
-                    .Select(x => new Game
+                var storeTask = SearchStoreAsync(query);
+
+                var localTask = Task.Run(async () =>
+                {
+                    var appList = await GetAppListAsync();
+                    if (appList.Count == 0) return [];
+
+                    return appList
+                        .Select(app => (app, score: CalculateScore(app.Name, queryLower)))
+                        .Where(x => x.score > 0)
+                        .OrderByDescending(x => x.score)
+                        .ThenBy(x => x.app.Name.Length)
+                        .Take(maxResults)
+                        .Select(x => new Game
+                        {
+                            AppId = x.app.AppId,
+                            Name = x.app.Name,
+                            Type = "Game"
+                        })
+                        .ToList();
+                });
+
+                await Task.WhenAll(storeTask, localTask);
+
+                var smartResults = storeTask.Result;
+                var localResults = localTask.Result;
+
+                var finalResults = new List<Game>(smartResults);
+                var existingIds = new HashSet<string>(smartResults.Select(g => g.AppId));
+
+                foreach (var game in localResults)
+                {
+                    if (finalResults.Count >= maxResults) break;
+
+                    if (!existingIds.Contains(game.AppId))
                     {
-                        AppId = x.app.AppId,
-                        Name = x.app.Name,
-                        Type = "Game"
-                    })
-                    .ToList();
+                        finalResults.Add(game);
+                        existingIds.Add(game.AppId);
+                    }
+                }
+
+                return finalResults;
             });
 
             return
@@ -241,7 +309,7 @@ public class SearchService
         if (nameLower.Contains(query))
             score += 1000;
 
-        var lengthPenalty = Math.Max(0, (appName.Length - query.Length * 2) / 10);
+        var lengthPenalty = Math.Max(0, (appName.Length - query.Length) * 50);
         score -= lengthPenalty;
 
         if (HasWordBoundaryMatch(nameLower, query))
@@ -304,7 +372,9 @@ public class SearchService
                                     game.Name = details.Name;
 
                                 game.Type = details.Type;
-                                game.IconUrl = details.IconUrl;
+                                if (string.IsNullOrEmpty(game.IconUrl))
+                                    game.IconUrl = details.IconUrl;
+
                                 tcs.SetResult(true);
                             }
                             catch (Exception ex)
@@ -320,33 +390,13 @@ public class SearchService
                             game.Name = details.Name;
 
                         game.Type = details.Type;
-                        game.IconUrl = details.IconUrl;
+                        if (string.IsNullOrEmpty(game.IconUrl))
+                            game.IconUrl = details.IconUrl;
                     }
                 }
                 catch
                 {
                     DetailsCache[game.AppId] = new GameDetails("Game", string.Empty, $"App {game.AppId}");
-                    if (syncContext != null)
-                    {
-                        var tcs = new TaskCompletionSource<bool>();
-                        syncContext.Post(_ =>
-                        {
-                            try
-                            {
-                                game.Type = "Game";
-                                tcs.SetResult(true);
-                            }
-                            catch (Exception ex)
-                            {
-                                tcs.SetException(ex);
-                            }
-                        }, null);
-                        await tcs.Task;
-                    }
-                    else
-                    {
-                        game.Type = "Game";
-                    }
                 }
                 finally
                 {
@@ -375,7 +425,7 @@ public class SearchService
                     game.Name = details.Name;
 
                 game.Type = details.Type;
-                if (!string.IsNullOrEmpty(details.IconUrl))
+                if (string.IsNullOrEmpty(game.IconUrl) && !string.IsNullOrEmpty(details.IconUrl))
                     game.IconUrl = details.IconUrl;
             }
     }
@@ -468,7 +518,8 @@ public class SearchService
         if (details.Name != $"App {game.AppId}")
             game.Name = details.Name;
         game.Type = details.Type;
-        game.IconUrl = details.IconUrl;
+        if (string.IsNullOrEmpty(game.IconUrl))
+            game.IconUrl = details.IconUrl;
     }
 
     public static async Task FetchIconUrlAsync(Game game)
