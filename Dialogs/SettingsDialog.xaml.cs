@@ -193,14 +193,82 @@ public partial class SettingsDialog
             return false;
         }
 
-        var injectorPath = Path.Combine(greenLumaPath, "DLLInjector.exe");
-        if (!File.Exists(injectorPath))
+        if (string.Equals(Path.GetFullPath(steamPath), Path.GetFullPath(greenLumaPath),
+                StringComparison.OrdinalIgnoreCase))
         {
-            CustomMessageBox.Show($"DLLInjector.exe not found at:\n{injectorPath}", "Validation",
+            var result = CustomMessageBox.Show(
+                "Installing GreenLuma in the Steam directory is not recommended. Some games scan this location for GreenLuma files, which may result in detection.\n\n" +
+                "Do you want to continue anyway?",
+                "Security Warning",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning);
+
+            if (result != MessageBoxResult.Yes)
+                return false;
+        }
+
+        if (IsPathReadOnly(greenLumaPath))
+        {
+            CustomMessageBox.Show(
+                $"The GreenLuma path is read-only.\nPlease ensure the folder is writable and not marked as Read-Only.\nPath: {greenLumaPath}",
+                "Validation",
+                icon: MessageBoxImage.Exclamation);
+            return false;
+        }
+
+        var missingFiles = GetMissingGreenLumaFiles(greenLumaPath);
+        if (missingFiles.Count > 0)
+        {
+            CustomMessageBox.Show(
+                $"GreenLuma installation is incomplete.\nThe following files are missing:\n\n{string.Join("\n", missingFiles)}",
+                "Validation",
                 icon: MessageBoxImage.Exclamation);
             return false;
         }
 
         return true;
+    }
+
+    private static bool IsPathReadOnly(string path)
+    {
+        try
+        {
+            var info = new DirectoryInfo(path);
+            if ((info.Attributes & FileAttributes.ReadOnly) != 0)
+                return true;
+
+            var tempFile = Path.Combine(path, Path.GetRandomFileName());
+            using (File.Create(tempFile, 1, FileOptions.DeleteOnClose))
+            {
+            }
+
+            return false;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static List<string> GetMissingGreenLumaFiles(string path)
+    {
+        string[] requiredFiles =
+        [
+            "DLLInjector.exe",
+            "DLLInjector.ini",
+            "GreenLumaSettings_2025.exe",
+            "GreenLuma_2025_x64.dll",
+            "GreenLuma_2025_x86.dll",
+            Path.Combine("bin", "x64launcher.exe"),
+            Path.Combine("GreenLuma2025_Files", "AchievementUnlocked.wav"),
+            Path.Combine("GreenLuma2025_Files", "BootImage.bmp")
+        ];
+
+        var missing = new List<string>();
+        foreach (var file in requiredFiles)
+            if (!File.Exists(Path.Combine(path, file)))
+                missing.Add(file);
+
+        return missing;
     }
 }
