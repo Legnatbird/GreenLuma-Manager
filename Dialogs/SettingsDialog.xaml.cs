@@ -15,7 +15,6 @@ public partial class SettingsDialog
     public SettingsDialog(Config config)
     {
         InitializeComponent();
-
         _config = config;
 
         LoadSettings();
@@ -38,16 +37,29 @@ public partial class SettingsDialog
         if (e.Key == Key.Escape) Cancel_Click(this, new RoutedEventArgs());
     }
 
-    private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    private void Nav_Checked(object sender, RoutedEventArgs e)
     {
-        if (e.LeftButton == MouseButtonState.Pressed) DragMove();
+        if (ViewGeneral == null || ViewSystem == null || ViewAdvanced == null) return;
+
+        ViewGeneral.Visibility = Visibility.Collapsed;
+        ViewSystem.Visibility = Visibility.Collapsed;
+        ViewAdvanced.Visibility = Visibility.Collapsed;
+
+        if (NavGeneral.IsChecked == true) ShowView(ViewGeneral);
+        else if (NavSystem.IsChecked == true) ShowView(ViewSystem);
+        else if (NavAdvanced.IsChecked == true) ShowView(ViewAdvanced);
+    }
+
+    private void ShowView(UIElement view)
+    {
+        view.Visibility = Visibility.Visible;
     }
 
     private void BrowseSteam_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog
         {
-            Title = "Select Steam folder (e.g., C:\\Program Files (x86)\\Steam)"
+            Title = "Select Steam folder"
         };
 
         if (!string.IsNullOrWhiteSpace(TxtSteamPath.Text) && Directory.Exists(TxtSteamPath.Text))
@@ -60,7 +72,7 @@ public partial class SettingsDialog
     {
         var dialog = new OpenFolderDialog
         {
-            Title = "Select GreenLuma folder (containing DLLInjector.exe)"
+            Title = "Select GreenLuma folder"
         };
 
         if (!string.IsNullOrWhiteSpace(TxtGreenLumaPath.Text) && Directory.Exists(TxtGreenLumaPath.Text))
@@ -79,36 +91,8 @@ public partial class SettingsDialog
         if (!string.IsNullOrWhiteSpace(steamPath) && !string.IsNullOrWhiteSpace(greenLumaPath))
             CustomMessageBox.Show("Paths detected successfully!", "Success", icon: MessageBoxImage.Asterisk);
         else
-            CustomMessageBox.Show("Could not detect all paths automatically. Please set them manually.",
-                "Detection", icon: MessageBoxImage.Exclamation);
-    }
-
-    private void WipeData_Click(object sender, RoutedEventArgs e)
-    {
-        var confirm1 = CustomMessageBox.Show(
-            "This will delete all profiles and settings. Continue?",
-            "Wipe Data",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Exclamation);
-
-        if (confirm1 != MessageBoxResult.Yes)
-            return;
-
-        var confirm2 = CustomMessageBox.Show(
-            "Are you absolutely sure? This cannot be undone.",
-            "Confirm Wipe",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Exclamation);
-
-        if (confirm2 != MessageBoxResult.Yes)
-            return;
-
-        ConfigService.WipeData();
-
-        CustomMessageBox.Show("All data has been wiped. The application will now close.", "Complete",
-            icon: MessageBoxImage.Asterisk);
-
-        Application.Current.Shutdown();
+            CustomMessageBox.Show("Could not detect all paths automatically.", "Detection",
+                icon: MessageBoxImage.Exclamation);
     }
 
     private void DisableUpdateCheck_Changed(object sender, RoutedEventArgs e)
@@ -127,13 +111,28 @@ public partial class SettingsDialog
         if (!isEnabled) ChkAutoUpdate.IsChecked = false;
     }
 
+    private void WipeData_Click(object sender, RoutedEventArgs e)
+    {
+        if (CustomMessageBox.Show("This will delete all profiles and settings. Continue?", "Wipe Data",
+                MessageBoxButton.YesNo, MessageBoxImage.Exclamation) != MessageBoxResult.Yes)
+            return;
+
+        if (CustomMessageBox.Show("Are you absolutely sure? This cannot be undone.", "Confirm Wipe",
+                MessageBoxButton.YesNo, MessageBoxImage.Exclamation) != MessageBoxResult.Yes)
+            return;
+
+        ConfigService.WipeData();
+        CustomMessageBox.Show("All data has been wiped. The application will now close.", "Complete",
+            icon: MessageBoxImage.Asterisk);
+        Application.Current.Shutdown();
+    }
+
     private void Ok_Click(object sender, RoutedEventArgs e)
     {
         var steamPath = NormalizePath(TxtSteamPath.Text);
         var greenLumaPath = NormalizePath(TxtGreenLumaPath.Text);
 
-        if (!ValidatePaths(steamPath, greenLumaPath))
-            return;
+        if (!ValidatePaths(steamPath, greenLumaPath)) return;
 
         _config.SteamPath = steamPath;
         _config.GreenLumaPath = greenLumaPath;
@@ -148,12 +147,15 @@ public partial class SettingsDialog
         Close();
     }
 
+    private void Cancel_Click(object sender, RoutedEventArgs e)
+    {
+        DialogResult = false;
+        Close();
+    }
+
     private static string NormalizePath(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path))
-            return string.Empty;
-
-        return path.Trim().TrimEnd('\\', '/');
+        return string.IsNullOrWhiteSpace(path) ? string.Empty : path.Trim().TrimEnd('\\', '/');
     }
 
     private static bool ValidatePaths(string steamPath, string greenLumaPath)
@@ -166,8 +168,7 @@ public partial class SettingsDialog
 
         if (string.IsNullOrWhiteSpace(greenLumaPath))
         {
-            CustomMessageBox.Show("GreenLuma path cannot be empty.", "Validation",
-                icon: MessageBoxImage.Exclamation);
+            CustomMessageBox.Show("GreenLuma path cannot be empty.", "Validation", icon: MessageBoxImage.Exclamation);
             return false;
         }
 
@@ -201,11 +202,5 @@ public partial class SettingsDialog
         }
 
         return true;
-    }
-
-    private void Cancel_Click(object sender, RoutedEventArgs e)
-    {
-        DialogResult = false;
-        Close();
     }
 }
