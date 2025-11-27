@@ -877,7 +877,8 @@ public partial class MainWindow
 
             if (confirmResult != MessageBoxResult.Yes) return;
 
-            ShowToast($"Importing {newAppIds.Count} item(s)...");
+            var totalFound = newAppIds.Count;
+            ShowToast($"Importing {totalFound} item(s)...");
 
             var gameLikeAppIds = newAppIds.Where(id => id.EndsWith('0')).ToList();
 
@@ -977,6 +978,7 @@ public partial class MainWindow
 
             await Task.WhenAll(tasks);
 
+            var depotsAddedCount = 0;
             foreach (var depotId in newAppIds.Where(id => allFoundDepotIds.Contains(id)))
             {
                 string? parentAppId = null;
@@ -1005,7 +1007,11 @@ public partial class MainWindow
                     var parentGame = _games.FirstOrDefault(g => g.AppId == parentAppId) ??
                                      importedGames.FirstOrDefault(g => g.AppId == parentAppId);
 
-                    if (parentGame != null && !parentGame.Depots.Contains(depotId)) parentGame.Depots.Add(depotId);
+                    if (parentGame != null && !parentGame.Depots.Contains(depotId))
+                    {
+                        parentGame.Depots.Add(depotId);
+                        depotsAddedCount++;
+                    }
                 }
             }
 
@@ -1013,7 +1019,9 @@ public partial class MainWindow
 
             SaveCurrentProfile();
             UpdateGameListState();
-            ShowToast($"Successfully added {importedGames.Count} item(s) to '{_currentProfile.Name}'.");
+
+            var totalDepotsIncluded = importedGames.Sum(g => g.Depots.Count) + depotsAddedCount;
+            ShowToast($"Added {importedGames.Count} Games/DLCs & {totalDepotsIncluded} Depots from {totalFound} IDs");
         }
         catch
         {
@@ -1301,7 +1309,7 @@ public partial class MainWindow
 
         var fadeOut = new DoubleAnimation(1.0, 0.0, TimeSpan.FromMilliseconds(300))
         {
-            BeginTime = TimeSpan.FromMilliseconds(3500)
+            BeginTime = TimeSpan.FromMilliseconds(6000)
         };
         Storyboard.SetTarget(fadeOut, Toast);
         Storyboard.SetTargetProperty(fadeOut, new PropertyPath(OpacityProperty));
@@ -1358,7 +1366,6 @@ public partial class MainWindow
         }
         catch
         {
-            // ignored
             return;
         }
 
@@ -1386,6 +1393,8 @@ public partial class MainWindow
             ShowToast("All games already in profile");
             return;
         }
+
+        var totalFound = newAppIds.Count;
 
         var gameLikeAppIds = newAppIds.Where(id => id.EndsWith('0')).ToList();
 
@@ -1481,6 +1490,7 @@ public partial class MainWindow
 
         await Task.WhenAll(tasks);
 
+        var depotsAddedCount = 0;
         foreach (var depotId in newAppIds.Where(id => allFoundDepotIds.Contains(id)))
         {
             string? parentAppId = null;
@@ -1509,7 +1519,11 @@ public partial class MainWindow
                 var parentGame = defaultProfile.Games.FirstOrDefault(g => g.AppId == parentAppId) ??
                                  newGames.FirstOrDefault(g => g.AppId == parentAppId);
 
-                if (parentGame != null && !parentGame.Depots.Contains(depotId)) parentGame.Depots.Add(depotId);
+                if (parentGame != null && !parentGame.Depots.Contains(depotId))
+                {
+                    parentGame.Depots.Add(depotId);
+                    depotsAddedCount++;
+                }
             }
         }
 
@@ -1519,7 +1533,8 @@ public partial class MainWindow
 
         if (CmbProfile.SelectedItem?.ToString() == "default") LoadProfile("default");
 
-        ShowToast($"Imported {newGames.Count} games into default profile");
+        var totalDepotsIncluded = newGames.Sum(g => g.Depots.Count) + depotsAddedCount;
+        ShowToast($"Added {newGames.Count} Games/DLCs & {totalDepotsIncluded} Depots from {totalFound} IDs");
 
         if (showSteamWarning)
             CustomMessageBox.Show(
