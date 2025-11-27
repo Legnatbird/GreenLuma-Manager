@@ -24,18 +24,18 @@ public static class DepotService
 
     private class SteamManager : IDisposable
     {
-        private readonly SteamClient _steamClient;
+        private readonly Task _callbackLoop;
         private readonly CallbackManager _callbackManager;
-        private readonly SteamUser _steamUser;
+        private readonly TaskCompletionSource _connectedTcs;
+        private readonly CancellationTokenSource _cts;
+        private readonly TaskCompletionSource _loggedOnTcs;
         private readonly SteamApps _steamApps;
-
-        private bool _isRunning;
+        private readonly SteamClient _steamClient;
+        private readonly SteamUser _steamUser;
         private bool _isConnected;
         private bool _isLoggedOn;
-        private readonly Task _callbackLoop;
-        private readonly CancellationTokenSource _cts;
-        private readonly TaskCompletionSource _connectedTcs;
-        private readonly TaskCompletionSource _loggedOnTcs;
+
+        private bool _isRunning;
 
         public SteamManager()
         {
@@ -58,26 +58,34 @@ public static class DepotService
             _steamClient.Connect();
         }
 
+        public void Dispose()
+        {
+            _isRunning = false;
+            _cts.Cancel();
+            _steamClient.Disconnect();
+            _callbackLoop.Wait(1000);
+            _cts.Dispose();
+        }
+
         public async Task<AppPackageInfo?> GetAppPackageInfoAsync(uint appId)
         {
             try
             {
                 await EnsureReadyAsync();
 
-                var job = _steamApps.PICSGetProductInfo(new List<SteamApps.PICSRequest>
-                {
-                    new() { ID = appId, AccessToken = 0 }
-                }, []);
+                var request = new SteamApps.PICSRequest { ID = appId, AccessToken = 0 };
+                var job = _steamApps.PICSGetProductInfo(new List<SteamApps.PICSRequest> { request }, []);
 
                 var result = await job.ToTask();
 
-                if (result.Failed || result.Results == null || !result.Results.Any())
+                if (result.Failed || result.Results == null)
                     return null;
 
-                if (!result.Results[0].Apps.TryGetValue(appId, out var appData))
-                    return null;
+                foreach (var callback in result.Results)
+                    if (callback.Apps.TryGetValue(appId, out var appData))
+                        return ParseAppInfo(appId, appData);
 
-                return ParseAppInfo(appId, appData);
+                return null;
             }
             catch
             {
@@ -94,26 +102,25 @@ public static class DepotService
                 await _loggedOnTcs.Task;
         }
 
-        private static AppPackageInfo ParseAppInfo(uint appId,
+        private static AppPackageInfo? ParseAppInfo(uint appId,
             SteamApps.PICSProductInfoCallback.PICSProductInfo appData)
         {
+            var kv = appData.KeyValues;
+
+            var type = kv["common"]["type"].Value;
+            if (string.Equals(type, "depot", StringComparison.OrdinalIgnoreCase))
+                return null;
+
             var info = new AppPackageInfo
             {
                 AppId = appId.ToString()
             };
 
-            var kv = appData.KeyValues;
-
             var dlcList = kv["common"]["extended"]["listofdlc"].Value;
             if (!string.IsNullOrEmpty(dlcList))
-            {
                 info.DlcAppIds = dlcList.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
-            }
 
-            foreach (var dlcId in info.DlcAppIds)
-            {
-                info.DlcDepots[dlcId] = [];
-            }
+            foreach (var dlcId in info.DlcAppIds) info.DlcDepots[dlcId] = [];
 
             var depotsNode = kv["depots"];
             foreach (var child in depotsNode.Children)
@@ -124,16 +131,15 @@ public static class DepotService
                 if (depotId == appId)
                     continue;
 
+                if (child["manifests"] == KeyValue.Invalid && child["depotfromapp"] == KeyValue.Invalid)
+                    continue;
+
                 var dlcAppId = child["dlcappid"].Value;
 
                 if (!string.IsNullOrEmpty(dlcAppId) && info.DlcDepots.TryGetValue(dlcAppId, out var dlcDepotList))
-                {
                     dlcDepotList.Add(depotId.ToString());
-                }
                 else
-                {
                     info.Depots.Add(depotId.ToString());
-                }
             }
 
             return info;
@@ -168,15 +174,6 @@ public static class DepotService
                 _isLoggedOn = true;
                 _loggedOnTcs.TrySetResult();
             }
-        }
-
-        public void Dispose()
-        {
-            _isRunning = false;
-            _cts.Cancel();
-            _steamClient.Disconnect();
-            _callbackLoop.Wait(1000);
-            _cts.Dispose();
         }
     }
 }

@@ -929,6 +929,9 @@ public partial class MainWindow
                 {
                     try
                     {
+                        var info = await DepotService.FetchAppPackageInfoAsync(id);
+                        if (info == null) return;
+
                         var game = new Game { AppId = id, Name = string.Empty, Type = "Game" };
 
                         await SearchService.PopulateGameDetailsAsync(game);
@@ -1434,6 +1437,9 @@ public partial class MainWindow
             {
                 try
                 {
+                    var info = await DepotService.FetchAppPackageInfoAsync(id);
+                    if (info == null) return;
+
                     var game = new Game { AppId = id, Name = string.Empty, Type = "Game" };
 
                     await SearchService.PopulateGameDetailsAsync(game);
