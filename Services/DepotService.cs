@@ -1,5 +1,4 @@
-﻿using System.Net.Http;
-using Newtonsoft.Json.Linq;
+﻿using SteamKit2;
 
 namespace GreenLuma_Manager.Services;
 
@@ -13,77 +12,171 @@ public class AppPackageInfo
 
 public static class DepotService
 {
-    private const string SteamCmdApiUrl = "https://api.steamcmd.net/v1/info/{0}";
-    private static readonly HttpClient Client = new();
-
-    static DepotService()
-    {
-        Client.DefaultRequestHeaders.Add("User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
-        Client.Timeout = TimeSpan.FromSeconds(15);
-    }
+    private static readonly SteamManager Manager = new();
 
     public static async Task<AppPackageInfo?> FetchAppPackageInfoAsync(string appId)
     {
-        var cacheKey = $"packageinfo:{appId}";
-        try
-        {
-            return await SteamApiCache.GetOrAddAsync(cacheKey, async () =>
-            {
-                var info = new AppPackageInfo { AppId = appId };
-                var url = string.Format(SteamCmdApiUrl, appId);
-                var response = await Client.GetStringAsync(url);
-                var json = JObject.Parse(response);
-
-                if (json["status"]?.ToString() != "success")
-                    return info;
-
-                var data = json["data"]?[appId];
-                if (data == null)
-                    return info;
-
-                if (data["extended"]?["listofdlc"] is JValue { Value: string dlcString })
-                    info.DlcAppIds = dlcString.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
-
-                foreach (var dlcAppId in info.DlcAppIds) info.DlcDepots[dlcAppId] = [];
-
-                if (data["depots"] is not JObject depots)
-                    return info;
-
-                foreach (var depot in depots.Properties())
-                {
-                    if (!int.TryParse(depot.Name, out _))
-                        continue;
-
-                    if (depot.Name == appId)
-                        continue;
-
-                    if (depot.Value is not JObject depotData)
-                        continue;
-
-                    if (depotData["manifests"] == null && depotData["depotfromapp"] == null)
-                        continue;
-
-                    var dlcAppId = depotData["dlcappid"]?.ToString();
-
-                    if (string.IsNullOrEmpty(dlcAppId))
-                    {
-                        info.Depots.Add(depot.Name);
-                    }
-                    else
-                    {
-                        if (!info.DlcDepots.ContainsKey(dlcAppId)) info.DlcDepots[dlcAppId] = [];
-
-                        if (depot.Name != dlcAppId) info.DlcDepots[dlcAppId].Add(depot.Name);
-                    }
-                }
-
-                return info;
-            });
-        }
-        catch
-        {
+        if (!uint.TryParse(appId, out var id))
             return null;
+
+        return await Manager.GetAppPackageInfoAsync(id);
+    }
+
+    private class SteamManager : IDisposable
+    {
+        private readonly SteamClient _steamClient;
+        private readonly CallbackManager _callbackManager;
+        private readonly SteamUser _steamUser;
+        private readonly SteamApps _steamApps;
+
+        private bool _isRunning;
+        private bool _isConnected;
+        private bool _isLoggedOn;
+        private readonly Task _callbackLoop;
+        private readonly CancellationTokenSource _cts;
+        private readonly TaskCompletionSource _connectedTcs;
+        private readonly TaskCompletionSource _loggedOnTcs;
+
+        public SteamManager()
+        {
+            _steamClient = new SteamClient();
+            _callbackManager = new CallbackManager(_steamClient);
+            _steamUser = _steamClient.GetHandler<SteamUser>()!;
+            _steamApps = _steamClient.GetHandler<SteamApps>()!;
+
+            _cts = new CancellationTokenSource();
+            _connectedTcs = new TaskCompletionSource();
+            _loggedOnTcs = new TaskCompletionSource();
+
+            _callbackManager.Subscribe<SteamClient.ConnectedCallback>(OnConnected);
+            _callbackManager.Subscribe<SteamClient.DisconnectedCallback>(OnDisconnected);
+            _callbackManager.Subscribe<SteamUser.LoggedOnCallback>(OnLoggedOn);
+
+            _isRunning = true;
+            _callbackLoop = Task.Run(CallbackLoop);
+
+            _steamClient.Connect();
+        }
+
+        public async Task<AppPackageInfo?> GetAppPackageInfoAsync(uint appId)
+        {
+            try
+            {
+                await EnsureReadyAsync();
+
+                var job = _steamApps.PICSGetProductInfo(new List<SteamApps.PICSRequest>
+                {
+                    new() { ID = appId, AccessToken = 0 }
+                }, []);
+
+                var result = await job.ToTask();
+
+                if (result.Failed || result.Results == null || !result.Results.Any())
+                    return null;
+
+                if (!result.Results[0].Apps.TryGetValue(appId, out var appData))
+                    return null;
+
+                return ParseAppInfo(appId, appData);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private async Task EnsureReadyAsync()
+        {
+            if (!_isConnected)
+                await _connectedTcs.Task;
+
+            if (!_isLoggedOn)
+                await _loggedOnTcs.Task;
+        }
+
+        private static AppPackageInfo ParseAppInfo(uint appId,
+            SteamApps.PICSProductInfoCallback.PICSProductInfo appData)
+        {
+            var info = new AppPackageInfo
+            {
+                AppId = appId.ToString()
+            };
+
+            var kv = appData.KeyValues;
+
+            var dlcList = kv["common"]["extended"]["listofdlc"].Value;
+            if (!string.IsNullOrEmpty(dlcList))
+            {
+                info.DlcAppIds = dlcList.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+            }
+
+            foreach (var dlcId in info.DlcAppIds)
+            {
+                info.DlcDepots[dlcId] = [];
+            }
+
+            var depotsNode = kv["depots"];
+            foreach (var child in depotsNode.Children)
+            {
+                if (!uint.TryParse(child.Name, out var depotId))
+                    continue;
+
+                if (depotId == appId)
+                    continue;
+
+                var dlcAppId = child["dlcappid"].Value;
+
+                if (!string.IsNullOrEmpty(dlcAppId) && info.DlcDepots.TryGetValue(dlcAppId, out var dlcDepotList))
+                {
+                    dlcDepotList.Add(depotId.ToString());
+                }
+                else
+                {
+                    info.Depots.Add(depotId.ToString());
+                }
+            }
+
+            return info;
+        }
+
+        private async Task CallbackLoop()
+        {
+            while (_isRunning && !_cts.Token.IsCancellationRequested)
+            {
+                _callbackManager.RunWaitCallbacks(TimeSpan.FromMilliseconds(100));
+                await Task.Delay(100);
+            }
+        }
+
+        private void OnConnected(SteamClient.ConnectedCallback callback)
+        {
+            _isConnected = true;
+            _connectedTcs.TrySetResult();
+            _steamUser.LogOnAnonymous();
+        }
+
+        private void OnDisconnected(SteamClient.DisconnectedCallback callback)
+        {
+            _isConnected = false;
+            _isLoggedOn = false;
+        }
+
+        private void OnLoggedOn(SteamUser.LoggedOnCallback callback)
+        {
+            if (callback.Result == EResult.OK)
+            {
+                _isLoggedOn = true;
+                _loggedOnTcs.TrySetResult();
+            }
+        }
+
+        public void Dispose()
+        {
+            _isRunning = false;
+            _cts.Cancel();
+            _steamClient.Disconnect();
+            _callbackLoop.Wait(1000);
+            _cts.Dispose();
         }
     }
 }
