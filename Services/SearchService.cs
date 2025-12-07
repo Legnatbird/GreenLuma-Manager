@@ -2,7 +2,6 @@
 using System.Net.Http;
 using GreenLuma_Manager.Models;
 using Newtonsoft.Json.Linq;
-using SteamKit2;
 
 namespace GreenLuma_Manager.Services;
 
@@ -14,7 +13,7 @@ public class CacheEntry<T>
 
 public static class SteamApiCache
 {
-    private static readonly ConcurrentDictionary<string, CacheEntry<object>> Cache = new();
+    internal static readonly ConcurrentDictionary<string, CacheEntry<object>> Cache = new();
     private static readonly ConcurrentDictionary<string, Task<object>> TaskCache = new();
     private static readonly TimeSpan CacheDurationLocal = TimeSpan.FromMinutes(30);
 
@@ -56,15 +55,13 @@ public class SearchService
 
     private const string SteamStoreApiUrl = "https://api.steampowered.com/IStoreService/GetAppList/v1/";
     private const string SteamApiKey = "1DD0450A99F573693CD031EBB160907D";
+    private const int BatchSize = 150;
 
-    private const int MaxConcurrentRequests = 8;
     private static readonly HttpClient Client = new();
     private static List<SteamApp>? _appListCache;
     private static readonly Dictionary<string, GameDetails> DetailsCache = [];
     private static DateTime _cacheExpiry = DateTime.MinValue;
     private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(24);
-
-    private static readonly SteamManager Manager = new();
 
     static SearchService()
     {
@@ -157,10 +154,8 @@ public class SearchService
         }
         catch
         {
-            // ignored
+            return _appListCache ?? [];
         }
-
-        return _appListCache ?? [];
     }
 
     public static async Task<List<Game>> SearchAsync(string query, int maxResults = 50)
@@ -177,8 +172,10 @@ public class SearchService
             {
                 if (uint.TryParse(query, out _))
                 {
-                    var details = await FetchGameDetailsAsync(query);
-                    if (!string.IsNullOrEmpty(details.Name) && details.Name != $"App {query}")
+                    var detailsMap = await FetchGameDetailsBatchAsync([query]);
+                    if (detailsMap.TryGetValue(query, out var details) &&
+                        !string.IsNullOrEmpty(details.Name) &&
+                        details.Name != $"App {query}")
                         return
                         [
                             new Game
@@ -303,9 +300,7 @@ public class SearchService
 
     private static async Task FetchBatchDetailsAsync(List<Game> games)
     {
-        var gamesNeedingDetails = games
-            .Where(g => !DetailsCache.ContainsKey(g.AppId))
-            .ToList();
+        var gamesNeedingDetails = games.Where(g => !DetailsCache.ContainsKey(g.AppId)).ToList();
 
         if (gamesNeedingDetails.Count == 0)
         {
@@ -313,72 +308,16 @@ public class SearchService
             return;
         }
 
-        var syncContext = SynchronizationContext.Current;
-        var semaphore = new SemaphoreSlim(MaxConcurrentRequests);
+        var appIds = gamesNeedingDetails.Select(g => g.AppId).ToList();
+        var detailsMap = await FetchGameDetailsBatchAsync(appIds);
 
-        try
-        {
-            var tasks = gamesNeedingDetails.Select(async game =>
-            {
-                await semaphore.WaitAsync();
-                try
-                {
-                    var details = await FetchGameDetailsAsync(game.AppId);
-                    DetailsCache[game.AppId] = details;
+        foreach (var (appId, details) in detailsMap)
+            DetailsCache[appId] = details;
 
-                    if (syncContext != null)
-                    {
-                        var tcs = new TaskCompletionSource<bool>();
-                        syncContext.Post(_ =>
-                        {
-                            try
-                            {
-                                if (details.Name != $"App {game.AppId}")
-                                    game.Name = details.Name;
+        ApplyCachedDetails(games);
 
-                                game.Type = details.Type;
-                                if (string.IsNullOrEmpty(game.IconUrl))
-                                    game.IconUrl = details.IconUrl;
-
-                                tcs.SetResult(true);
-                            }
-                            catch (Exception ex)
-                            {
-                                tcs.SetException(ex);
-                            }
-                        }, null);
-                        await tcs.Task;
-                    }
-                    else
-                    {
-                        if (details.Name != $"App {game.AppId}")
-                            game.Name = details.Name;
-
-                        game.Type = details.Type;
-                        if (string.IsNullOrEmpty(game.IconUrl))
-                            game.IconUrl = details.IconUrl;
-                    }
-                }
-                catch
-                {
-                    DetailsCache[game.AppId] = new GameDetails("Game", string.Empty, $"App {game.AppId}");
-                }
-                finally
-                {
-                    semaphore.Release();
-                }
-            }).ToList();
-
-            await Task.WhenAll(tasks);
-            ApplyCachedDetails(games);
-
-            if (gamesNeedingDetails.Count > 0)
-                _cacheExpiry = DateTime.Now.Add(CacheDuration);
-        }
-        finally
-        {
-            semaphore.Dispose();
-        }
+        if (gamesNeedingDetails.Count > 0)
+            _cacheExpiry = DateTime.Now.Add(CacheDuration);
     }
 
     private static void ApplyCachedDetails(List<Game> games)
@@ -395,83 +334,83 @@ public class SearchService
             }
     }
 
-    private static async Task<GameDetails> FetchGameDetailsAsync(string appId)
+    private static async Task<Dictionary<string, GameDetails>> FetchGameDetailsBatchAsync(List<string> appIds)
     {
-        var key = $"details:{appId}";
-        return await SteamApiCache.GetOrAddAsync(key, async () =>
+        var results = new Dictionary<string, GameDetails>();
+        var uncachedAppIds = new List<string>();
+
+        foreach (var appId in appIds)
         {
-            if (!uint.TryParse(appId, out var id))
-                return new GameDetails("Game", string.Empty, $"App {appId}");
+            var key = $"details:{appId}";
+            if (SteamApiCache.Cache.TryGetValue(key, out var entry) &&
+                DateTime.Now < entry.Expiry &&
+                entry.Data is GameDetails cached)
+                results[appId] = cached;
+            else
+                uncachedAppIds.Add(appId);
+        }
 
-            var info = await Manager.GetAppInfoAsync(id);
+        if (uncachedAppIds.Count == 0)
+            return results;
 
-            if (info != null)
-            {
-                var iconUrl = !string.IsNullOrEmpty(info.IconUrl)
-                    ? info.IconUrl
-                    : await TryGetCdnImageAsync(appId);
+        var batches = uncachedAppIds.Chunk(BatchSize).ToList();
 
-                return new GameDetails(info.Type, iconUrl ?? string.Empty, info.Name);
-            }
-
-            var fallbackIconUrl = await TryGetCdnImageAsync(appId);
-            return new GameDetails("Game", fallbackIconUrl ?? string.Empty, $"App {appId}");
-        });
-    }
-
-    private static async Task<string?> TryGetCdnImageAsync(string appId)
-    {
-        string[] cdnUrls =
-        [
-            $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg",
-            $"https://cdn.akamai.steamstatic.com/steam/apps/{appId}/header.jpg",
-            $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/capsule_231x87.jpg"
-        ];
-
-        using var client = new HttpClient();
-        client.Timeout = TimeSpan.FromSeconds(2);
-
-        foreach (var url in cdnUrls)
+        foreach (var batch in batches)
             try
             {
-                var head = new HttpRequestMessage(HttpMethod.Head, url);
-                var headResp = await client.SendAsync(head);
-                if (headResp.IsSuccessStatusCode)
-                    return url;
+                var validAppIds = batch.Where(id => uint.TryParse(id, out _)).ToList();
+                if (validAppIds.Count == 0) continue;
+
+                var batchResults =
+                    await SteamService.Instance.GetAppInfoBatchAsync(validAppIds.Select(uint.Parse).ToList());
+
+                foreach (var (appId, details) in batchResults)
+                {
+                    var appIdStr = appId.ToString();
+                    results[appIdStr] = details;
+
+                    var key = $"details:{appIdStr}";
+                    SteamApiCache.Cache[key] = new CacheEntry<object>
+                    {
+                        Expiry = DateTime.Now.Add(TimeSpan.FromMinutes(30)),
+                        Data = details
+                    };
+                }
+
+                foreach (var appIdStr in validAppIds.Where(id => !results.ContainsKey(id)))
+                {
+                    var fallbackDetails = new GameDetails("Game", string.Empty, $"App {appIdStr}");
+                    results[appIdStr] = fallbackDetails;
+
+                    var key = $"details:{appIdStr}";
+                    SteamApiCache.Cache[key] = new CacheEntry<object>
+                    {
+                        Expiry = DateTime.Now.Add(TimeSpan.FromMinutes(30)),
+                        Data = fallbackDetails
+                    };
+                }
             }
             catch
             {
-                // ignored
+                foreach (var appIdStr in batch)
+                    if (!results.ContainsKey(appIdStr))
+                        results[appIdStr] = new GameDetails("Game", string.Empty, $"App {appIdStr}");
             }
 
-        return null;
-    }
-
-    private static string MapSteamTypeToDisplayType(string steamType)
-    {
-        return steamType.ToLower() switch
-        {
-            "game" => "Game",
-            "dlc" => "DLC",
-            "demo" => "Demo",
-            "mod" => "Mod",
-            "video" => "Video",
-            "music" => "Soundtrack",
-            "bundle" => "Bundle",
-            "episode" => "Episode",
-            "tool" or "advertising" => "Software",
-            _ => "Game"
-        };
+        return results;
     }
 
     public static async Task PopulateGameDetailsAsync(Game game)
     {
-        var details = await FetchGameDetailsAsync(game.AppId);
-        if (details.Name != $"App {game.AppId}")
-            game.Name = details.Name;
-        game.Type = details.Type;
-        if (string.IsNullOrEmpty(game.IconUrl))
-            game.IconUrl = details.IconUrl;
+        var detailsMap = await FetchGameDetailsBatchAsync([game.AppId]);
+        if (detailsMap.TryGetValue(game.AppId, out var details))
+        {
+            if (details.Name != $"App {game.AppId}")
+                game.Name = details.Name;
+            game.Type = details.Type;
+            if (string.IsNullOrEmpty(game.IconUrl))
+                game.IconUrl = details.IconUrl;
+        }
     }
 
     public static async Task FetchIconUrlAsync(Game game)
@@ -487,145 +426,5 @@ public class SearchService
         await FetchBatchDetailsAsync(games);
     }
 
-    private class SteamApp(string appId, string name)
-    {
-        public string AppId { get; } = appId;
-        public string Name { get; } = name;
-    }
-
-    private class GameDetails(string type, string iconUrl, string name)
-    {
-        public string Type { get; } = type;
-        public string IconUrl { get; } = iconUrl;
-        public string Name { get; } = name;
-    }
-
-    private class SteamManager : IDisposable
-    {
-        private readonly Task _callbackLoop;
-        private readonly CallbackManager _callbackManager;
-
-        private readonly TaskCompletionSource _connectedTcs;
-        private readonly CancellationTokenSource _cts;
-        private readonly TaskCompletionSource _loggedOnTcs;
-        private readonly SteamApps _steamApps;
-        private readonly SteamClient _steamClient;
-        private readonly SteamUser _steamUser;
-
-        private bool _isConnected;
-        private bool _isLoggedOn;
-        private bool _isRunning;
-
-        public SteamManager()
-        {
-            _steamClient = new SteamClient();
-            _callbackManager = new CallbackManager(_steamClient);
-            _steamUser = _steamClient.GetHandler<SteamUser>()!;
-            _steamApps = _steamClient.GetHandler<SteamApps>()!;
-
-            _cts = new CancellationTokenSource();
-            _connectedTcs = new TaskCompletionSource();
-            _loggedOnTcs = new TaskCompletionSource();
-
-            _callbackManager.Subscribe<SteamClient.ConnectedCallback>(OnConnected);
-            _callbackManager.Subscribe<SteamClient.DisconnectedCallback>(OnDisconnected);
-            _callbackManager.Subscribe<SteamUser.LoggedOnCallback>(OnLoggedOn);
-
-            _isRunning = true;
-            _callbackLoop = Task.Run(CallbackLoop);
-
-            _steamClient.Connect();
-        }
-
-        public void Dispose()
-        {
-            _isRunning = false;
-            _cts.Cancel();
-            _steamClient.Disconnect();
-            _callbackLoop.Wait(1000);
-            _cts.Dispose();
-        }
-
-        public async Task<GameDetails?> GetAppInfoAsync(uint appId)
-        {
-            try
-            {
-                await EnsureReadyAsync();
-
-                var request = new SteamApps.PICSRequest { ID = appId, AccessToken = 0 };
-                var job = _steamApps.PICSGetProductInfo(new List<SteamApps.PICSRequest> { request }, []);
-                var result = await job.ToTask();
-
-                if (result.Failed || result.Results == null)
-                    return null;
-
-                foreach (var callback in result.Results)
-                    if (callback.Apps.TryGetValue(appId, out var appData))
-                    {
-                        var kv = appData.KeyValues;
-                        var common = kv["common"];
-                        var name = common["name"].Value;
-                        var type = common["type"].Value ?? "Game";
-
-                        var headerImage = common["header_image"].Value;
-                        var iconUrl = !string.IsNullOrEmpty(headerImage)
-                            ? headerImage
-                            : $"https://cdn.cloudflare.steamstatic.com/steam/apps/{appId}/header.jpg";
-
-                        return new GameDetails(MapSteamTypeToDisplayType(type), iconUrl, name ?? $"App {appId}");
-                    }
-
-                return null;
-            }
-            catch
-            {
-                return null;
-            }
-        }
-
-        private async Task EnsureReadyAsync()
-        {
-            if (!_isConnected)
-                await _connectedTcs.Task;
-
-            if (!_isLoggedOn)
-                await _loggedOnTcs.Task;
-        }
-
-        private async Task CallbackLoop()
-        {
-            while (_isRunning && !_cts.Token.IsCancellationRequested)
-            {
-                _callbackManager.RunWaitCallbacks(TimeSpan.FromMilliseconds(100));
-                await Task.Delay(100);
-            }
-        }
-
-        private void OnConnected(SteamClient.ConnectedCallback callback)
-        {
-            _isConnected = true;
-            _connectedTcs.TrySetResult();
-            _steamUser.LogOnAnonymous();
-        }
-
-        private void OnDisconnected(SteamClient.DisconnectedCallback callback)
-        {
-            _isConnected = false;
-            _isLoggedOn = false;
-
-            Task.Delay(TimeSpan.FromSeconds(5)).ContinueWith(_ =>
-            {
-                if (_isRunning) _steamClient.Connect();
-            });
-        }
-
-        private void OnLoggedOn(SteamUser.LoggedOnCallback callback)
-        {
-            if (callback.Result == EResult.OK)
-            {
-                _isLoggedOn = true;
-                _loggedOnTcs.TrySetResult();
-            }
-        }
-    }
+    private record SteamApp(string AppId, string Name);
 }
