@@ -9,7 +9,7 @@
     xmlns:utilities="clr-namespace:GreenLuma_Manager.Utilities"
     Title="GreenLuma Manager"
     Width="1036"
-    Height="708"
+    Height="714"
     MinWidth="1036"
     MinHeight="708"
     Background="#FF1A1A1A"
