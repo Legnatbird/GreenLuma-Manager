@@ -28,7 +28,7 @@ public partial class GreenLumaService
     public static async Task<int> GenerateAppListAsync(Profile? profile, Config? config)
     {
         if (profile == null || config == null || string.IsNullOrWhiteSpace(config.GreenLumaPath))
-            return 0;
+            return -1;
 
         try
         {
@@ -60,8 +60,7 @@ public partial class GreenLumaService
         }
         catch
         {
-            // ignored
-            return 0;
+            return -1;
         }
     }
 
