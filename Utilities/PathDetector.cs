@@ -8,6 +8,7 @@ public class PathDetector
     private static readonly string[] GreenLumaSignatureFiles =
     [
         "DLLInjector.exe",
+        "GreenLuma_2025_x64.dll",
         "GreenLuma_2025_x86.dll",
         "GreenLuma_2024_x86.dll",
         "GreenLuma_2023_x86.dll"

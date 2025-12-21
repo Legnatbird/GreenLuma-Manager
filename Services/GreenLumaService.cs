@@ -73,7 +73,7 @@ public partial class GreenLumaService
                 if (!ValidatePaths(config))
                     return false;
 
-                KillSteam();
+                KillSteam(config);
 
                 return LaunchInjector(config);
             }
@@ -117,14 +117,11 @@ public partial class GreenLumaService
         return true;
     }
 
-    private static void KillSteam()
+    private static void KillSteam(Config config)
     {
         try
         {
-            var steamExePath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-                "Steam",
-                "Steam.exe");
+            var steamExePath = Path.Combine(config.SteamPath, "Steam.exe");
 
             if (File.Exists(steamExePath))
                 try

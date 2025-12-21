@@ -259,7 +259,6 @@ public partial class SettingsDialog
             "GreenLumaSettings_2025.exe",
             "GreenLuma_2025_x64.dll",
             "GreenLuma_2025_x86.dll",
-            Path.Combine("bin", "x64launcher.exe"),
             Path.Combine("GreenLuma2025_Files", "AchievementUnlocked.wav"),
             Path.Combine("GreenLuma2025_Files", "BootImage.bmp")
         ];
@@ -268,6 +267,12 @@ public partial class SettingsDialog
         foreach (var file in requiredFiles)
             if (!File.Exists(Path.Combine(path, file)))
                 missing.Add(file);
+
+        var x86Launcher = Path.Combine(path, "bin", "x86launcher.exe");
+        var x64Launcher = Path.Combine(path, "bin", "x64launcher.exe");
+
+        if (!File.Exists(x86Launcher) && !File.Exists(x64Launcher))
+            missing.Add(Path.Combine("bin", "x86launcher.exe"));
 
         return missing;
     }
