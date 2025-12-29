@@ -6,6 +6,8 @@ A modern desktop app for managing your GreenLuma AppList. No more entering app I
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![.NET](https://img.shields.io/badge/.NET-10.0-purple)
 
+### Need help or just want to hang out? Check out my [Discord server](https://discord.gg/9Vhtpayj4U) (.gg/9Vhtpayj4U)!
+
 ## Features
 
 - **Smart Search** - Find any Steam game or DLC instantly with real-time results from Steam's API
@@ -80,12 +82,6 @@ A modern desktop app for managing your GreenLuma AppList. No more entering app I
 - Steam installed
 - GreenLuma 2025 installed
 
-## Project Structure
-
-- `Services/` - Core services (Config, Profile, Search, GreenLuma, Update, IconCache)
-- `Models/` - Data models (Config, Profile, Game, UpdateInfo)
-- `Dialogs/` - WPF dialogs (Settings, Create Profile, Message Box)
-- `Utilities/` - Helper classes (Path detection, Icon converter, Autostart)
 
 ## Special Thanks
 
