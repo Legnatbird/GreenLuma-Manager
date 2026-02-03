@@ -1947,7 +1947,7 @@
                     VerticalAlignment="Center"
                     FontSize="11"
                     Foreground="{StaticResource TextTert}"
-                    Text="Copyright © 3vil3vo 2025" />
+                    Text="Copyright © 3vil3vo 2026" />
             </Grid>
         </Border>
 
