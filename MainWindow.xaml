@@ -301,6 +301,13 @@
                                             MaxHeight="200"
                                             HorizontalScrollBarVisibility="Disabled"
                                             VerticalScrollBarVisibility="Auto">
+                                            <ScrollViewer.Resources>
+                                                <ResourceDictionary>
+                                                    <ResourceDictionary.MergedDictionaries>
+                                                        <ResourceDictionary Source="pack://application:,,,/PresentationFramework.Fluent;component/Themes/Fluent.Dark.xaml" />
+                                                    </ResourceDictionary.MergedDictionaries>
+                                                </ResourceDictionary>
+                                            </ScrollViewer.Resources>
                                             <StackPanel IsItemsHost="True" />
                                         </ScrollViewer>
                                     </Border>
