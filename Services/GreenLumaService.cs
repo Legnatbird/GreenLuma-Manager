@@ -8,7 +8,7 @@ namespace GreenLuma_Manager.Services;
 public partial class GreenLumaService
 {
     private const int ProcessKillTimeoutMs = 5000;
-    public const int AppListLimit = 134;
+    public const int AppListLimit = 135;
     private static readonly string[] SteamProcessNames = ["steam", "steamwebhelper", "steamerrorfilereporter"];
 
     [GeneratedRegex(@"[A-Za-z]:\\[^""\r\n]+?\.dll", RegexOptions.IgnoreCase)]
