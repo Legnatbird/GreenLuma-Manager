@@ -1652,6 +1652,24 @@ public partial class MainWindow
             return;
         }
 
+        var (isValid, isStealthOnly, _) = GreenLumaService.ValidateInstallation(greenLumaPath);
+
+        if (isValid && isStealthOnly)
+        {
+            TglStealthMode.IsChecked = true;
+            TglStealthMode.IsEnabled = false;
+
+            if (!_config.NoHook)
+            {
+                _config.NoHook = true;
+                ConfigService.Save(_config);
+            }
+        }
+        else
+        {
+            TglStealthMode.IsEnabled = true;
+        }
+
         var isSamePath = string.Equals(
             Path.GetFullPath(steamPath),
             Path.GetFullPath(greenLumaPath),
@@ -1662,9 +1680,9 @@ public partial class MainWindow
         if (isSamePath)
             SetStatusIndicator(successBrush, "Ready  •  Normal Mode");
         else if (_config.NoHook)
-            SetStatusIndicator(successBrush, "Ready  •  Enhanced Stealth Mode");
+            SetStatusIndicator(successBrush, isStealthOnly ? "Ready  •  Stealth Mode (Forced)" : "Ready  •  Stealth Mode");
         else
-            SetStatusIndicator(successBrush, "Ready  •  Stealth Mode");
+            SetStatusIndicator(successBrush, "Ready  •  Normal Mode");
     }
 
     private void SetStatusIndicator(Brush color, string text)

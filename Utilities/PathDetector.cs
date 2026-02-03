@@ -1,18 +1,13 @@
 ﻿using System.IO;
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
 namespace GreenLuma_Manager.Utilities;
 
-public class PathDetector
+public partial class PathDetector
 {
-    private static readonly string[] GreenLumaSignatureFiles =
-    [
-        "DLLInjector.exe",
-        "GreenLuma_2025_x64.dll",
-        "GreenLuma_2025_x86.dll",
-        "GreenLuma_2024_x86.dll",
-        "GreenLuma_2023_x86.dll"
-    ];
+    [GeneratedRegex(@"GreenLuma_(\d{4})_x(64|86)\.dll", RegexOptions.IgnoreCase)]
+    private static partial Regex GreenLumaDllRegex();
 
     public static (string SteamPath, string GreenLumaPath) DetectPaths()
     {
@@ -110,9 +105,22 @@ public class PathDetector
 
     private static bool ContainsGreenLumaFiles(string directory)
     {
-        foreach (var fileName in GreenLumaSignatureFiles)
-            if (File.Exists(Path.Combine(directory, fileName)))
-                return true;
+        if (!File.Exists(Path.Combine(directory, "DLLInjector.exe")))
+            return false;
+
+        try
+        {
+            var files = Directory.GetFiles(directory, "GreenLuma_*_x*.dll");
+            foreach (var file in files)
+            {
+                if (GreenLumaDllRegex().IsMatch(Path.GetFileName(file)))
+                    return true;
+            }
+        }
+        catch
+        {
+            // ignored
+        }
 
         return false;
     }

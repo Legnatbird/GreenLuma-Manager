@@ -127,25 +127,6 @@ public partial class SettingsDialog
         Application.Current.Shutdown();
     }
 
-    private void Ok_Click(object sender, RoutedEventArgs e)
-    {
-        var steamPath = NormalizePath(TxtSteamPath.Text);
-        var greenLumaPath = NormalizePath(TxtGreenLumaPath.Text);
-
-        if (!ValidatePaths(steamPath, greenLumaPath)) return;
-
-        _config.SteamPath = steamPath;
-        _config.GreenLumaPath = greenLumaPath;
-        _config.ReplaceSteamAutostart = ChkReplaceSteamAutostart.IsChecked.GetValueOrDefault();
-        _config.DisableUpdateCheck = ChkDisableUpdateCheck.IsChecked.GetValueOrDefault();
-        _config.AutoUpdate = ChkAutoUpdate.IsChecked.GetValueOrDefault();
-
-        ConfigService.Save(_config);
-        AutostartManager.ManageAutostart(_config.ReplaceSteamAutostart, _config);
-
-        DialogResult = true;
-        Close();
-    }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)
     {
@@ -216,17 +197,51 @@ public partial class SettingsDialog
             return false;
         }
 
-        var missingFiles = GetMissingGreenLumaFiles(greenLumaPath);
-        if (missingFiles.Count > 0)
+        var (isValid, _, missingFiles) = GreenLumaService.ValidateInstallation(greenLumaPath);
+        if (!isValid)
         {
             CustomMessageBox.Show(
-                $"GreenLuma installation is incomplete.\nThe following files are missing:\n\n{string.Join("\n", missingFiles)}",
+                $"GreenLuma installation is incomplete.\nThe following files are missing or invalid:\n\n{string.Join("\n", missingFiles)}",
                 "Validation",
                 icon: MessageBoxImage.Exclamation);
             return false;
         }
 
         return true;
+    }
+
+    private void Ok_Click(object sender, RoutedEventArgs e)
+    {
+        var steamPath = NormalizePath(TxtSteamPath.Text);
+        var greenLumaPath = NormalizePath(TxtGreenLumaPath.Text);
+
+        if (!ValidatePaths(steamPath, greenLumaPath)) return;
+
+        var (_, isStealthOnly, _) = GreenLumaService.ValidateInstallation(greenLumaPath);
+        if (isStealthOnly)
+        {
+            CustomMessageBox.Show(
+                "Only files required for Stealth Mode were detected.\n" +
+                "The application will be locked to Stealth Mode.\n\n" +
+                "Warning: Some GreenLuma features may not work without the full installation.",
+                "Stealth Mode Only",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+
+            _config.NoHook = true;
+        }
+
+        _config.SteamPath = steamPath;
+        _config.GreenLumaPath = greenLumaPath;
+        _config.ReplaceSteamAutostart = ChkReplaceSteamAutostart.IsChecked.GetValueOrDefault();
+        _config.DisableUpdateCheck = ChkDisableUpdateCheck.IsChecked.GetValueOrDefault();
+        _config.AutoUpdate = ChkAutoUpdate.IsChecked.GetValueOrDefault();
+
+        ConfigService.Save(_config);
+        AutostartManager.ManageAutostart(_config.ReplaceSteamAutostart, _config);
+
+        DialogResult = true;
+        Close();
     }
 
     private static bool IsPathReadOnly(string path)
@@ -250,30 +265,5 @@ public partial class SettingsDialog
         }
     }
 
-    private static List<string> GetMissingGreenLumaFiles(string path)
-    {
-        string[] requiredFiles =
-        [
-            "DLLInjector.exe",
-            "DLLInjector.ini",
-            "GreenLumaSettings_2025.exe",
-            "GreenLuma_2025_x64.dll",
-            "GreenLuma_2025_x86.dll",
-            Path.Combine("GreenLuma2025_Files", "AchievementUnlocked.wav"),
-            Path.Combine("GreenLuma2025_Files", "BootImage.bmp")
-        ];
 
-        var missing = new List<string>();
-        foreach (var file in requiredFiles)
-            if (!File.Exists(Path.Combine(path, file)))
-                missing.Add(file);
-
-        var x86Launcher = Path.Combine(path, "bin", "x86launcher.exe");
-        var x64Launcher = Path.Combine(path, "bin", "x64launcher.exe");
-
-        if (!File.Exists(x86Launcher) && !File.Exists(x64Launcher))
-            missing.Add(Path.Combine("bin", "x86launcher.exe"));
-
-        return missing;
-    }
 }

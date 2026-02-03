@@ -13,7 +13,89 @@ public partial class GreenLumaService
 
     [GeneratedRegex(@"[A-Za-z]:\\[^""\r\n]+?\.dll", RegexOptions.IgnoreCase)]
     private static partial Regex DllPathRegex();
+    [GeneratedRegex(@"GreenLuma_(\d{4})_x(64|86)\.dll", RegexOptions.IgnoreCase)]
+    private static partial Regex GreenLumaDllRegex();
 
+    public static (bool IsValid, bool IsStealthOnly, List<string> MissingFiles) ValidateInstallation(string path)
+    {
+        var missing = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+            return (false, false, missing);
+
+        string? year = null;
+        string? arch = null;
+        try
+        {
+            var dllFiles = Directory.GetFiles(path, "GreenLuma_*_x*.dll");
+            foreach (var file in dllFiles)
+            {
+                var match = GreenLumaDllRegex().Match(Path.GetFileName(file));
+                if (match.Success)
+                {
+                    year = match.Groups[1].Value;
+                    arch = match.Groups[2].Value;
+                    if (string.Equals(arch, "64", StringComparison.OrdinalIgnoreCase))
+                        break;
+                }
+            }
+        }
+        catch
+        {
+            // ignored
+        }
+
+        if (year == null || arch == null)
+        {
+            missing.Add("GreenLuma_YYYY_xNN.dll (e.g. GreenLuma_2025_x64.dll)");
+            return (false, false, missing);
+        }
+
+        var primaryDll = $"GreenLuma_{year}_x{arch}.dll";
+
+        var stealthFiles = new List<string>
+        {
+            "DLLInjector.exe",
+            "DLLInjector.ini",
+            $"GreenLumaSettings_{year}.exe",
+            primaryDll
+        };
+
+        var otherArch = arch == "64" ? "86" : "64";
+        var fullFiles = new List<string>
+        {
+            $"GreenLuma_{year}_x{otherArch}.dll",
+            Path.Combine($"GreenLuma{year}_Files", "AchievementUnlocked.wav"),
+            Path.Combine($"GreenLuma{year}_Files", "BootImage.bmp")
+        };
+
+        var missingStealth = new List<string>();
+        foreach (var f in stealthFiles)
+            if (!File.Exists(Path.Combine(path, f)))
+                missingStealth.Add(f);
+
+        if (missingStealth.Count > 0)
+        {
+            return (false, false, missingStealth);
+        }
+
+        var missingFull = new List<string>();
+        foreach (var f in fullFiles)
+            if (!File.Exists(Path.Combine(path, f)))
+                missingFull.Add(f);
+
+        var x86Launcher = Path.Combine(path, "bin", "x86launcher.exe");
+        var x64Launcher = Path.Combine(path, "bin", "x64launcher.exe");
+        if (!File.Exists(x86Launcher) && !File.Exists(x64Launcher))
+            missingFull.Add(Path.Combine("bin", "x86launcher.exe"));
+
+        if (missingFull.Count > 0)
+        {
+            return (true, true, missingFull);
+        }
+
+        return (true, false, new List<string>());
+    }
     public static bool IsAppListGenerated(Config config)
     {
         if (string.IsNullOrWhiteSpace(config.GreenLumaPath))
