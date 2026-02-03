@@ -80,7 +80,7 @@ A modern desktop app for managing your GreenLuma AppList. No more entering app I
 - Windows 10/11
 - .NET 10.0 or higher
 - Steam installed
-- GreenLuma 2025 installed
+- GreenLuma 2025/6 installed
 
 
 ## Special Thanks
