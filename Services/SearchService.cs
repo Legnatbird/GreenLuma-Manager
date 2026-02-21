@@ -185,42 +185,56 @@ public class SearchService
         }
     }
 
-    public static async Task<List<Game>> SearchAsync(string query, int maxResults = 50)
+    public static Task<List<Game>> SearchAsync(string query, int maxResults = 50,
+        CancellationToken cancellationToken = default) =>
+        SearchIncrementalAsync(query, maxResults, null, cancellationToken);
+
+    public static async Task<List<Game>> SearchIncrementalAsync(string query, int maxResults,
+        IProgress<List<Game>>? partialProgress,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
             return [];
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var queryLower = query.ToLower();
             var cacheKey = $"search:{queryLower}:{maxResults}";
 
             var cached = await SteamApiCache.GetOrAddAsync(cacheKey, async () =>
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var preliminary = new List<Game>();
+
                 if (uint.TryParse(query, out _))
                 {
                     var detailsMap = await FetchGameDetailsBatchAsync([query]).ConfigureAwait(false);
                     if (detailsMap.TryGetValue(query, out var details) &&
                         !string.IsNullOrEmpty(details.Name) &&
                         details.Name != $"App {query}")
-                        return
-                        [
-                            new Game
-                            {
-                                AppId = query,
-                                Name = details.Name,
-                                Type = details.Type,
-                                IconUrl = string.Empty
-                            }
-                        ];
+                    {
+                        var numericGame = new Game
+                        {
+                            AppId = query,
+                            Name = details.Name,
+                            Type = details.Type,
+                            IconUrl = string.Empty
+                        };
+                        preliminary.Add(numericGame);
+                        partialProgress?.Report([numericGame]);
+                    }
                 }
 
                 var storeTask = SearchStoreAsync(query);
-
                 var localTask = Task.Run(async () =>
                 {
                     var appList = await GetAppListAsync().ConfigureAwait(false);
                     if (appList.Count == 0) return [];
+
+                    cancellationToken.ThrowIfCancellationRequested();
 
                     return appList
                         .Select(app => (app, score: CalculateScore(app.Name, queryLower)))
@@ -235,15 +249,22 @@ public class SearchService
                             Type = "Game"
                         })
                         .ToList();
-                });
+                }, cancellationToken);
 
-                await Task.WhenAll(storeTask, localTask).ConfigureAwait(false);
+                var storeResults = await storeTask.ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
 
-                var smartResults = storeTask.Result;
-                var localResults = localTask.Result;
+                if (storeResults.Count > 0)
+                {
+                    preliminary.AddRange(storeResults);
+                    partialProgress?.Report(new List<Game>(preliminary));
+                }
 
-                var finalResults = new List<Game>(smartResults);
-                var existingIds = new HashSet<string>(smartResults.Select(g => g.AppId));
+                var localResults = await localTask.ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var finalResults = new List<Game>(preliminary);
+                var existingIds = new HashSet<string>(preliminary.Select(g => g.AppId));
 
                 foreach (var game in localResults)
                 {
@@ -263,6 +284,10 @@ public class SearchService
             [
                 .. cached.Select(g => new Game { AppId = g.AppId, Name = g.Name, Type = g.Type, IconUrl = g.IconUrl })
             ];
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch
         {

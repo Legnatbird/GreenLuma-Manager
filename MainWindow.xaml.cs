@@ -31,6 +31,7 @@ public partial class MainWindow
     private DispatcherTimer? _loadingDotsTimer;
     private CancellationTokenSource? _profileLoadCts;
     private CancellationTokenSource? _searchCts;
+    private bool _searchResultsToastShown;
 
     public MainWindow()
     {
@@ -308,6 +309,8 @@ public partial class MainWindow
             _searchCts = new CancellationTokenSource();
             var token = _searchCts.Token;
 
+            _searchResultsToastShown = false;
+
             try
             {
                 await PerformSearch(query, token).ConfigureAwait(true);
@@ -357,7 +360,13 @@ public partial class MainWindow
 
         ShowSearchLoading();
 
-        var results = await Task.Run(() => SearchService.SearchAsync(query), token).ConfigureAwait(true);
+        var partial = new Progress<List<Game>>(games =>
+        {
+            if (token.IsCancellationRequested) return;
+            UpdateSearchResults(games, false);
+        });
+
+        var results = await SearchService.SearchIncrementalAsync(query, 50, partial, token).ConfigureAwait(true);
 
         if (token.IsCancellationRequested)
             return;
@@ -367,6 +376,7 @@ public partial class MainWindow
         if (token.IsCancellationRequested)
             return;
 
+        UpdateSearchResults(results, true);
         DisplaySearchResults(results);
     }
 
@@ -398,9 +408,12 @@ public partial class MainWindow
 
     private void DisplaySearchResults(List<Game> results)
     {
-        _searchResults.Clear();
-
-        foreach (var game in results) _searchResults.Add(game);
+        var same = AreSameResults(results);
+        if (!same)
+        {
+            _searchResults.Clear();
+            foreach (var game in results) _searchResults.Add(game);
+        }
 
         DgResults.Items.SortDescriptions.Clear();
 
@@ -413,6 +426,21 @@ public partial class MainWindow
         TxtResultCount.Text = _searchResults.Count.ToString();
         _loadingDotsTimer?.Stop();
 
+        if (PnlSearchLoading.Visibility != Visibility.Visible)
+        {
+            if (same)
+                return;
+
+            if (_searchResults.Count > 0)
+                ShowResultsGrid(!_searchResultsToastShown);
+            else
+                ShowEmptyResults();
+
+            if (_searchResults.Count > 0)
+                _searchResultsToastShown = true;
+            return;
+        }
+
         var fadeOut = new DoubleAnimation(1.0, 0.0, TimeSpan.FromMilliseconds(150));
         fadeOut.Completed += async (_, _) =>
         {
@@ -420,15 +448,20 @@ public partial class MainWindow
             await Task.Delay(50);
 
             if (_searchResults.Count > 0)
-                ShowResultsGrid();
+            {
+                ShowResultsGrid(!_searchResultsToastShown);
+                _searchResultsToastShown = true;
+            }
             else
+            {
                 ShowEmptyResults();
+            }
         };
 
         PnlSearchLoading.BeginAnimation(OpacityProperty, fadeOut);
     }
 
-    private void ShowResultsGrid()
+    private void ShowResultsGrid(bool showToast = true)
     {
         DgResults.Opacity = 0.0;
         DgResults.Visibility = Visibility.Visible;
@@ -440,7 +473,66 @@ public partial class MainWindow
         };
 
         DgResults.BeginAnimation(OpacityProperty, fadeIn);
-        ShowToast($"Found {_searchResults.Count} results");
+        if (showToast)
+            ShowToast($"Found {_searchResults.Count} results");
+    }
+
+    private void UpdateSearchResults(List<Game> results, bool isFinal)
+    {
+        var same = AreSameResults(results);
+        if (!same)
+        {
+            _searchResults.Clear();
+
+            foreach (var game in results) _searchResults.Add(game);
+        }
+
+        TxtResultCount.Text = isFinal
+            ? _searchResults.Count.ToString()
+            : $"{_searchResults.Count} (loading more...)";
+
+        if (same && !isFinal)
+            return;
+
+        if (isFinal)
+        {
+            if (_searchResults.Count == 0)
+                ShowEmptyResults();
+            return;
+        }
+
+        _loadingDotsTimer?.Stop();
+        PnlSearchLoading.Visibility = Visibility.Collapsed;
+        var showToast = !_searchResultsToastShown;
+        ShowResultsGrid(showToast);
+        if (showToast)
+            _searchResultsToastShown = true;
+    }
+
+    private bool AreSameResults(IReadOnlyList<Game> newResults)
+    {
+        if (_searchResults.Count == 0 && newResults.Count == 0)
+            return true;
+
+        var maxCheck = Math.Min(3, Math.Min(_searchResults.Count, newResults.Count));
+
+        if (maxCheck < 3)
+        {
+            if (_searchResults.Count != newResults.Count)
+                return false;
+
+            for (var i = 0; i < maxCheck; i++)
+                if (!string.Equals(_searchResults[i].AppId, newResults[i].AppId, StringComparison.Ordinal))
+                    return false;
+
+            return _searchResults.Count == newResults.Count;
+        }
+
+        for (var i = 0; i < 3; i++)
+            if (!string.Equals(_searchResults[i].AppId, newResults[i].AppId, StringComparison.Ordinal))
+                return false;
+
+        return true;
     }
 
     private void ShowEmptyResults()
