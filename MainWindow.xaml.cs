@@ -309,6 +309,7 @@ public partial class MainWindow
             _searchCts = new CancellationTokenSource();
             var token = _searchCts.Token;
 
+            // New search: reset toast so we only announce once per query.
             _searchResultsToastShown = false;
 
             try
@@ -360,6 +361,7 @@ public partial class MainWindow
 
         ShowSearchLoading();
 
+        // Show partial hits ASAP; UI stays responsive while local/SteamKit completes.
         var partial = new Progress<List<Game>>(games =>
         {
             if (token.IsCancellationRequested) return;
@@ -477,6 +479,7 @@ public partial class MainWindow
             ShowToast($"Found {_searchResults.Count} results");
     }
 
+    // Merge incremental results; skip repaint if top-3 are identical to avoid flicker.
     private void UpdateSearchResults(List<Game> results, bool isFinal)
     {
         var same = AreSameResults(results);
@@ -509,6 +512,7 @@ public partial class MainWindow
             _searchResultsToastShown = true;
     }
 
+    // Lightweight equality: same top-3 (or exact when small) means no UI churn.
     private bool AreSameResults(IReadOnlyList<Game> newResults)
     {
         if (_searchResults.Count == 0 && newResults.Count == 0)

@@ -116,6 +116,7 @@ public class SearchService
         }
     }
 
+    // Pull app list, prefer cached copy (RAM or disk) to keep first search snappy.
     private static async Task<List<SteamApp>> GetAppListAsync()
     {
         if (_appListCache != null && DateTime.Now < _cacheExpiry)
@@ -189,6 +190,7 @@ public class SearchService
         CancellationToken cancellationToken = default) =>
         SearchIncrementalAsync(query, maxResults, null, cancellationToken);
 
+    // Incremental search: emit store hits ASAP via progress, then merge local list to feel responsive.
     public static async Task<List<Game>> SearchIncrementalAsync(string query, int maxResults,
         IProgress<List<Game>>? partialProgress,
         CancellationToken cancellationToken = default)
@@ -335,6 +337,7 @@ public class SearchService
         return Math.Max(0, score);
     }
 
+    // Fire-and-forget warmup so the first search feels instant (connect SteamKit + hydrate app list).
     public static Task PrewarmAsync()
     {
         var preloadSteam = Task.Run(() => _ = SteamService.Instance);
@@ -508,6 +511,7 @@ public class SearchService
         }
     }
 
+    // Persist app list so cold starts still have instant suggestions.
     private static async Task SaveAppListToDiskAsync(List<SteamApp> apps, DateTime expiry)
     {
         try
