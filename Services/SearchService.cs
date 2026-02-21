@@ -1,5 +1,7 @@
 ﻿using System.Collections.Concurrent;
+using System.IO;
 using System.Net.Http;
+using System.Text.Json;
 using GreenLuma_Manager.Models;
 using Newtonsoft.Json.Linq;
 
@@ -60,6 +62,11 @@ public class SearchService
     private const int BatchSize = 150;
 
     private static readonly HttpClient Client = new();
+    private static readonly string CacheFolder =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "GreenLumaManager", "cache");
+
+    private static readonly string AppListCacheFile = Path.Combine(CacheFolder, "steam_app_list.json");
     private static List<SteamApp>? _appListCache;
     private static readonly SemaphoreSlim AppListLock = new(1, 1);
     private static readonly ConcurrentDictionary<string, GameDetails> DetailsCache = new();
@@ -120,6 +127,14 @@ public class SearchService
             if (_appListCache != null && DateTime.Now < _cacheExpiry)
                 return _appListCache;
 
+            var diskApps = await TryLoadAppListFromDiskAsync().ConfigureAwait(false);
+            if (diskApps != null && diskApps.Apps.Count > 0 && DateTime.Now < diskApps.Expiry)
+            {
+                _appListCache = diskApps.Apps;
+                _cacheExpiry = diskApps.Expiry;
+                return _appListCache;
+            }
+
             _appListCache = [];
             uint lastAppId = 0;
             const int maxResults = 50000;
@@ -157,6 +172,7 @@ public class SearchService
             }
 
             _cacheExpiry = DateTime.Now.Add(CacheDuration);
+            _ = SaveAppListToDiskAsync(_appListCache, _cacheExpiry);
             return _appListCache;
         }
         catch
@@ -292,6 +308,13 @@ public class SearchService
             score += 100;
 
         return Math.Max(0, score);
+    }
+
+    public static Task PrewarmAsync()
+    {
+        var preloadSteam = Task.Run(() => _ = SteamService.Instance);
+        var preloadApps = Task.Run(GetAppListAsync);
+        return Task.WhenAll(preloadSteam, preloadApps);
     }
 
     private static bool HasWordBoundaryMatch(string name, string query)
@@ -440,4 +463,41 @@ public class SearchService
     }
 
     private record SteamApp(string AppId, string Name);
+
+    private record AppListDiskCache(DateTime Expiry, List<SteamApp> Apps);
+
+    private static async Task<AppListDiskCache?> TryLoadAppListFromDiskAsync()
+    {
+        try
+        {
+            if (!File.Exists(AppListCacheFile))
+                return null;
+
+            await using var stream = File.OpenRead(AppListCacheFile);
+            var cached = await JsonSerializer.DeserializeAsync<AppListDiskCache>(stream).ConfigureAwait(false);
+            return cached;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task SaveAppListToDiskAsync(List<SteamApp> apps, DateTime expiry)
+    {
+        try
+        {
+            Directory.CreateDirectory(CacheFolder);
+            var cache = new AppListDiskCache(expiry, apps);
+            await using var stream = File.Create(AppListCacheFile);
+            await JsonSerializer.SerializeAsync(stream, cache, new JsonSerializerOptions
+            {
+                WriteIndented = false
+            }).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best-effort cache persistence; ignore failures
+        }
+    }
 }

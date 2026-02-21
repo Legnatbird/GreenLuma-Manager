@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.Threading.Tasks;
 using System.Windows;
 using GreenLuma_Manager.Models;
 using GreenLuma_Manager.Services;
@@ -14,6 +15,7 @@ public partial class App
         {
             PluginService.Initialize();
             PluginService.OnApplicationStartup();
+            _ = Task.Run(SearchService.PrewarmAsync);
 
             if (e.Args.Length > 0)
                 foreach (var arg in e.Args)
