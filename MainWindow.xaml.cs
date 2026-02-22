@@ -529,7 +529,7 @@ public partial class MainWindow
                 if (!string.Equals(_searchResults[i].AppId, newResults[i].AppId, StringComparison.Ordinal))
                     return false;
 
-            return _searchResults.Count == newResults.Count;
+            return true;
         }
 
         for (var i = 0; i < 3; i++)

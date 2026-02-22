@@ -15,7 +15,17 @@ public partial class App
         {
             PluginService.Initialize();
             PluginService.OnApplicationStartup();
-            _ = Task.Run(SearchService.PrewarmAsync);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await SearchService.PrewarmAsync();
+                }
+                catch
+                {
+                    // best-effort warmup; ignore failures
+                }
+            });
 
             if (e.Args.Length > 0)
                 foreach (var arg in e.Args)

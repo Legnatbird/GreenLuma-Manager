@@ -79,12 +79,12 @@ public class SearchService
         Client.Timeout = TimeSpan.FromSeconds(10);
     }
 
-    private static async Task<List<Game>> SearchStoreAsync(string query)
+    private static async Task<List<Game>> SearchStoreAsync(string query, CancellationToken cancellationToken)
     {
         try
         {
             var url = string.Format(SteamStoreSearchUrl, Uri.EscapeDataString(query));
-            var response = await Client.GetStringAsync(url).ConfigureAwait(false);
+            var response = await Client.GetStringAsync(url, cancellationToken).ConfigureAwait(false);
             var json = JObject.Parse(response);
 
             var items = json["items"];
@@ -230,7 +230,7 @@ public class SearchService
                     }
                 }
 
-                var storeTask = SearchStoreAsync(query);
+                var storeTask = SearchStoreAsync(query, cancellationToken);
                 var localTask = Task.Run(async () =>
                 {
                     var appList = await GetAppListAsync().ConfigureAwait(false);
